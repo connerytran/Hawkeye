@@ -2,3 +2,4 @@ pics/
 .env
 venv
 __pycache__
+.venv

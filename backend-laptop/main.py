@@ -1,0 +1,130 @@
+
+from fastapi import FastAPI
+import requests
+from pydantic import BaseModel
+import os
+from dotenv import load_dotenv
+from datetime import datetime
+import uvicorn
+from fastapi.middleware.cors import CORSMiddleware
+
+
+load_dotenv()
+app = FastAPI()
+
+# Add CORS middleware. Allows for requests from different ports/origins
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins (dev only, not for production)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# pi_port = os.getenv('pi_port')
+pi_port = 5000
+# num_of_pis = int(os.getenv('num_of_pis'))
+pi_hosts = ['localhost']
+# online_pis = []
+# invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*', ' ', '.']
+
+
+# adds in all ip addresses of pis
+# for i in range(num_of_pis):
+#   host = os.getenv(f'pi_host_{i}')
+#   if host:
+#     pi_hosts.append(host)
+#   else: 
+#     print("No good")
+
+
+
+# A class that inherets pydantic BaseModel, automatically structures API requests
+class PiRequest(BaseModel):
+    pis: list[str]
+
+
+
+
+@app.get('/status')
+async def status(pis: list[str] = None):
+    """
+    TODO
+    """
+    if pis is None:
+        pis = pi_hosts
+    results = {}
+    status = None
+
+    for pi in pis: 
+        url = f"http://{pi}:{pi_port}/status"
+        
+        try:
+            #The requests.get() function sends an HTTP GET request
+            response = requests.get(url, timeout=10) # Set a 10-second timeout
+
+            # Check for a successful HTTP status code 
+            if response.status_code == 200:
+                results[pi] = response.json() 
+                status = 'success'
+            else:
+                # Handle non-200 status codes (e.g., 500 server error) PI DOES RESPOND
+                results[pi] = {'error' : response.json()}
+                status = 'Pi Response: error'
+
+        except Exception as e:
+            # Handle network errors (Pi is off, wrong IP, etc.) PI DOESN'T RESPOND
+            results[pi] = {"error": str(e)}
+            status = 'Error: pi did not respond'
+
+    return {
+        'status' : status,
+       'results' : results
+    }
+
+
+
+
+
+@app.post('/start-capture')
+async def start_capture(request: PiRequest):
+    """
+    TODO
+    """
+    pis = request.pis 
+    results = {}
+    status = None
+
+    for pi in pis: 
+        url = f"http://{pi}:{pi_port}/start-capture"
+        
+        try:
+            #The requests.post() function sends an HTTP POST request
+            response = requests.post(url, timeout=10) # Set a 10-second timeout
+
+            # Check for a successful HTTP status code 
+            if response.status_code == 200:
+                results[pi] = response.json() 
+                status = 'success'
+
+            else:
+                # Handle non-200 status codes (e.g., 500 server error)
+                results[pi] = {'error' : response.json()}
+                status = 'Pi Response: error'
+
+        except Exception as e:
+            # Handle network errors (Pi is off, wrong IP, etc.)
+            results[pi] = {"error": str(e)}
+            status = 'Error: pi did not respond'
+
+    return {
+        'status' : status,
+        'results' : results
+    }
+
+
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host='0.0.0.0', port=8000)

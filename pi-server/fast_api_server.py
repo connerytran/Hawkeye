@@ -4,6 +4,8 @@ from datetime import datetime
 from pydantic import BaseModel
 import uuid
 import subprocess
+import uvicorn
+
 
 app = FastAPI()
 
@@ -149,3 +151,7 @@ async def upload_status():
         'timestamp' : datetime.now().isoformat()
     }
 
+
+
+if __name__ == '__main__':
+    uvicorn.run(app, host='0.0.0.0', port=5000)
