@@ -228,8 +228,15 @@ async def globus_transfer(request: GlobusTransferRequest):
 
     try:
         pOpen = subprocess.Popen([venv_python, 'globus_transfer.py', request.foldername], cwd=src_dir_path,
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE) # Eventually should store result for debugging
-        return {'message': pOpen.stdout, 'job_id' : job_id} # problem, I don't really know when the job is done or not. I have to check globus for that
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = pOpen.communicate()
+        return {
+            'message': 'Transfer started.' if pOpen.returncode == 0 else 'Transfer failed.',
+            'job_id': job_id,
+            'stdout': stdout.decode(),
+            'stderr': stderr.decode(),
+            'returncode': pOpen.returncode,
+        }
     except Exception as e:
         upload_state.complete_job(success=False, error_message=str(e))
         raise HTTPException(status_code=500, detail='Failed to start transfer.')
