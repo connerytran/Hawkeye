@@ -8,7 +8,7 @@ app = FastAPI()
 Pi_Camera = PiCamera()
 
 
-@app.get("/status")
+@app.get("/capture-status")
 async def get_status():
 
     capture_status = Pi_Camera.get_capture_status()
@@ -23,7 +23,7 @@ async def start_capture():
     
     try:
         Pi_Camera.start_capture()
-        return {"message": "Taking pictures now."}
+        return {"message": "Attempted capture script."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start capture: {str(e)}")
      

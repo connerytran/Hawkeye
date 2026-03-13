@@ -3,9 +3,7 @@ import cv2
 import time
 import os
 from datetime import datetime
-from dotenv import load_dotenv
 
-load_dotenv()
 
 PHOTO_DIR = "/home/tomato-imager/TomatoImager/pics/"
 num_of_cams = 3

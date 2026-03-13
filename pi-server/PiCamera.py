@@ -7,7 +7,7 @@ from datetime import datetime
 from threading import Event, Thread
 import cam_capture
 
-load_dotenv()
+load_dotenv(dotenv_path="/home/tomato-imager/TomatoImager/.env")
 
 SRC_PATH = "/home/tomato-imager/TomatoImager/pics/"
 DEST_PATH ="/rs1/shares/cals-research-station/clinton/hawkeye/"
