@@ -1,5 +1,4 @@
-
-
+from threading import Event
 import cv2
 import time
 import os
@@ -8,17 +7,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-photo_dir = os.getenv('photo_dir')
-stop_path = os.getenv('stop_path')
-num_of_cams = int(os.getenv('num_of_cams'))
-width = int(os.getenv('width'))
-height = int(os.getenv('height'))
-exposure = int(os.getenv('exposure'))
-gain = int(os.getenv('gain'))
-brightness = int(os.getenv('brightness'))
-contrast = int(os.getenv('contrast'))
+PHOTO_DIR = "/home/tomato-imager/TomatoImager/pics/"
+num_of_cams = 3
 timestamp = datetime.now().strftime("%m-%d-%Y_%H-%M-%S")
+
+# CAM CTRLS =========
+width = 1920
+height = 1080
+exposure = 1
+gain = 0
+brightness = 0
+contrast = 32
 pic_num = 0
+# ===================
+
 
 def intialize_cam(cam_idx):
     """
@@ -108,14 +110,15 @@ def set_cam_ctrls(cap, width, height, exposure, gain, brightness, contrast):
 
 
 
-def main():
+def main(stop_flag: Event):
 
+    caps_array = []
     try:
         
-        if os.path.exists(stop_path):
-          os.remove(stop_path)
+        if stop_flag.is_set():
+            print("Stop flag set, exiting capture loop.")
+            return
 
-        caps_array = []
         # Initializes all cams
         for cam_idx in range(0, num_of_cams * 2, 2):
             cap = intialize_cam(cam_idx)
@@ -128,11 +131,11 @@ def main():
         while True:
             
             for cam_idx, cap in enumerate(caps_array):
-                take_picture(cap, cam_idx, photo_dir)
+                take_picture(cap, cam_idx, PHOTO_DIR)
             
-            if os.path.exists(stop_path):
-              os.remove(stop_path)
-              break
+            if stop_flag.is_set():
+                print("Stop flag set, exiting capture loop.")
+                break
 
     
     except KeyboardInterrupt:
@@ -142,11 +145,5 @@ def main():
     finally:
         for cap in caps_array:
             cap.release()
-
-
-
-
-if __name__ == '__main__':
-    main()
 
 

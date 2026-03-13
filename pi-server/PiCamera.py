@@ -1,21 +1,20 @@
-
 import globus_sdk
 from globus_sdk import TransferClient
 from globus_sdk.globus_app import UserApp
 import os
 from dotenv import load_dotenv
 from datetime import datetime
-import subprocess
+from threading import Event, Thread
+import cam_capture
 
 load_dotenv()
 
-SCRIPT_DIR = "/home/tomato-imager/TomatoImager/pi-server/"
-VENV_DIR = "/home/tomato-imager/TomatoImager/venv/bin/python"
 SRC_PATH = "/home/tomato-imager/TomatoImager/pics/"
 DEST_PATH ="/rs1/shares/cals-research-station/clinton/hawkeye/"
 CLIENT_ID = os.getenv('CLIENT_ID')
 SOURCE_COLLECTION = os.getenv('SOURCE_COLLECTION')
 DEST_COLLECTION = os.getenv('DEST_COLLECTION')
+PI_ID = os.getenv('PI_ID')
 
 
 
@@ -26,6 +25,7 @@ class PiCamera:
         self.capture_start_time: datetime = None
         self.capture_end_time: datetime = None
         self.task_id: str = None
+        self.stop_flag = Event()
 
         app = UserApp('Pi-Globus-Transfer', client_id=CLIENT_ID)
         self.transfer_client = TransferClient(app=app)
@@ -38,7 +38,9 @@ class PiCamera:
         if self.is_capturing:
             return {"error": "Capture already in progress"}
         try:
-            subprocess.Popen([VENV_DIR, 'usb_cam.py'], cwd=SCRIPT_DIR)
+            self.stop_flag.clear()  # Ensure stop flag is clear before starting
+            thread = Thread(target=cam_capture.main, args=(self.stop_flag,))
+            thread.start()
             self.is_capturing = True
             self.capture_start_time = datetime.now()
             self.capture_end_time = None
@@ -56,7 +58,7 @@ class PiCamera:
         if not self.is_capturing:
             return {"error": "Capture already stopped"}
         try:
-            subprocess.run([VENV_DIR, 'stop_sig.py'], cwd=SCRIPT_DIR)
+            self.stop_flag.set()
             self.is_capturing = False
             self.capture_end_time = datetime.now()
             return {"message": "Capture stopped."}
@@ -87,8 +89,8 @@ class PiCamera:
 
         transfer_request = globus_sdk.TransferData(source_endpoint=SOURCE_COLLECTION, 
                                                     destination_endpoint=DEST_COLLECTION) # Create transfer request
-        dest_path = os.path.join(DEST_PATH, foldername) # Append foldername to destination path
-        transfer_request.add_item(SRC_PATH, dest_path)
+        dest_path = os.path.join(DEST_PATH, foldername, PI_ID) # Append foldername and pi id to destination path
+        transfer_request.add_item(SRC_PATH, dest_path, recursive=True) # Add transfer item with recursive flag for directories
 
         try:
             task = self.transfer_client.submit_transfer(transfer_request) # Submit transfer request
