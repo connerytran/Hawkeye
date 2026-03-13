@@ -21,7 +21,7 @@ PI_ID = os.getenv('PI_ID')
 class PiCamera:
 
     def __init__(self):
-        self.is_capturing: bool = False
+        self.capture_thread: Thread = None
         self.capture_start_time: datetime = None
         self.capture_end_time: datetime = None
         self.task_id: str = None
@@ -35,18 +35,17 @@ class PiCamera:
 
     def start_capture(self):
 
-        if self.is_capturing:
+        if self.capture_thread is not None and self.capture_thread.is_alive():
             return {"error": "Capture already in progress"}
         try:
             self.stop_flag.clear()  # Ensure stop flag is clear before starting
-            thread = Thread(target=cam_capture.main, args=(self.stop_flag,))
-            thread.start()
-            self.is_capturing = True
+            self.capture_thread = Thread(target=cam_capture.main, args=(self.stop_flag,))
+            self.capture_thread.start()
             self.capture_start_time = datetime.now()
             self.capture_end_time = None
             return {"message": "Taking pictures now."}
         except Exception as e:
-            self.is_capturing = False
+            self.capture_thread = None
             self.capture_start_time = None
             self.capture_end_time = None
             return {"error": f"Failed to start capture: {str(e)}"}
@@ -55,11 +54,10 @@ class PiCamera:
 
     def stop_capture(self):
 
-        if not self.is_capturing:
+        if self.capture_thread is None and not self.capture_thread.is_alive():
             return {"error": "Capture already stopped"}
         try:
             self.stop_flag.set()
-            self.is_capturing = False
             self.capture_end_time = datetime.now()
             return {"message": "Capture stopped."}
         except Exception as e:
@@ -67,8 +65,15 @@ class PiCamera:
         
 
     def get_capture_status(self):
+        capture_status = ""
+        if self.capture_thread is None: 
+            capture_status = "Capture never started"
+        elif self.capture_thread.is_alive():
+            capture_status = "Capturing"
+        else:
+            capture_status = "Not capturing"
         return {
-            "is_capturing": self.is_capturing,
+            "capture_status": capture_status,
             "capture_start_time": self.capture_start_time,
             "capture_end_time": self.capture_end_time
         }

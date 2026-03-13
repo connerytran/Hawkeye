@@ -10,7 +10,7 @@
 - [x] Migrate capture logic into the class
 - [x] Migrate Globus transfer into the class using the SDK (replace subprocess CLI calls)
 - [x] Update FastAPI endpoints to use the `PiCamera` instance
-- [ ] Test each endpoint manually
+- [x] Test each endpoint manually
 
 ## 📍 GPS + Image Metadata
 - [ ] Integrate NMEA reading into PiCamera so location data is captured during each session
