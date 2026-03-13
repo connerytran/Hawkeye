@@ -11,11 +11,11 @@ load_dotenv()
 
 SCRIPT_DIR = "/home/tomato-imager/TomatoImager/pi-server/"
 VENV_DIR = "/home/tomato-imager/TomatoImager/venv/bin/python"
+SRC_PATH = "/home/tomato-imager/TomatoImager/pics/"
+DEST_PATH ="/rs1/shares/cals-research-station/clinton/hawkeye/"
 CLIENT_ID = os.getenv('CLIENT_ID')
 SOURCE_COLLECTION = os.getenv('SOURCE_COLLECTION')
 DEST_COLLECTION = os.getenv('DEST_COLLECTION')
-SRC_PATH = "/home/tomato-imager/TomatoImager/pics/"
-DEST_PATH ="/rs1/shares/cals-research-station/clinton/hawkeye/"
 
 
 
