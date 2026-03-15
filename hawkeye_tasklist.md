@@ -1,4 +1,4 @@
-# TomatoImager — Next Steps Checklist
+# Hawkeye — Next Steps Checklist
 
 ## 🔐 Immediate Blockers
 - [x] Run `globus login` and complete browser authentication
@@ -20,8 +20,8 @@
 - [x] Add `delete_photos()` method to PiCamera to clear pics before a new capture run
 
 ## 🖥️ Laptop Backend + Frontend
-- [ ] Wire up the laptop backend to the working Pi endpoints
-- [ ] Connect the TomatoScan frontend to the laptop backend
+- [x] Wire up the laptop backend to the working Pi endpoints
+- [ ] Connect the Hawkeye frontend to the laptop backend
 
 ## ⚙️ Reliability
 - [ ] Create a systemd service file for the FastAPI Pi server so it starts on boot

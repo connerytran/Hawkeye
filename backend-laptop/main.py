@@ -207,7 +207,7 @@ async def globus_transfer(request: GlobusRequest):
         
         try:
             #The requests.post() function sends an HTTP POST request
-            response = requests.post(url, params={'foldername': foldername}, timeout=5) 
+            response = requests.post(url, json={'foldername': foldername}, timeout=5) 
 
             # Check for a successful HTTP status code 
             if response.status_code == 200:
