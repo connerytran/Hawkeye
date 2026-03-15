@@ -18,7 +18,7 @@ async def get_status():
 @app.post("/start-capture")
 async def start_capture():
 
-    if Pi_Camera.is_capturing:
+    if Pi_Camera.capture_thread is not None and Pi_Camera.capture_thread.is_alive():
         raise HTTPException(status_code=400, detail="Capture already in progress")
     
     try:
@@ -33,7 +33,7 @@ async def start_capture():
 @app.post("/stop-capture")
 async def stop_capture():
 
-    if not Pi_Camera.is_capturing:
+    if Pi_Camera.capture_thread is None or not Pi_Camera.capture_thread.is_alive():
         raise HTTPException(status_code=400, detail="Capture already stopped")    
 
     try:

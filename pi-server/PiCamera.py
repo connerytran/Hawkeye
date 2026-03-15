@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from threading import Event, Thread
 import cam_capture
+from utils import gps_reader
 
 load_dotenv(dotenv_path="/home/tomato-imager/TomatoImager/.env")
 
@@ -31,6 +32,10 @@ class PiCamera:
         self.transfer_client = TransferClient(app=app)
         self.transfer_client.add_app_data_access_scope(DEST_COLLECTION)
 
+        ## Runs the thread that updates current_location
+        self.current_location = {'lon': None, 'lat': None}                
+        gps_thread = Thread(target=gps_reader.main, args=(self.current_location,), daemon=True)
+        gps_thread.start()
 
 
     def start_capture(self):
@@ -39,7 +44,7 @@ class PiCamera:
             return {"error": "Capture already in progress"}
         try:
             self.stop_flag.clear()  # Ensure stop flag is clear before starting
-            self.capture_thread = Thread(target=cam_capture.main, args=(self.stop_flag,))
+            self.capture_thread = Thread(target=cam_capture.main, args=(self.stop_flag, self.current_location))
             self.capture_thread.start()
             self.capture_start_time = datetime.now()
             self.capture_end_time = None
@@ -54,7 +59,7 @@ class PiCamera:
 
     def stop_capture(self):
 
-        if self.capture_thread is None and not self.capture_thread.is_alive():
+        if self.capture_thread is None or not self.capture_thread.is_alive():
             return {"error": "Capture already stopped"}
         try:
             self.stop_flag.set()

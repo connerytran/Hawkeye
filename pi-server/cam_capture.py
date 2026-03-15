@@ -1,8 +1,8 @@
 from threading import Event
 import cv2
-import time
 import os
 from datetime import datetime
+import piexif
 
 
 PHOTO_DIR = "/home/tomato-imager/TomatoImager/pics/"
@@ -33,13 +33,13 @@ def intialize_cam(cam_idx):
         print('Cannot open camera')
         return None
 
-    set_cam_ctrls(cap, width, height, exposure, gain, brightness, contrast)
+    _set_cam_ctrls(cap, width, height, exposure, gain, brightness, contrast)
 
     return cap
 
 
 
-def take_picture(cap, cam_idx, photo_dir):
+def take_picture(cap, cam_idx, photo_dir, current_location):
     """
     Given the camera, it will take a picture and save it to a folder
 
@@ -47,35 +47,53 @@ def take_picture(cap, cam_idx, photo_dir):
     cap (cv2 VideoCapture): capture object for taking pictures
     """
     global pic_num
-    save_path = photo_dir
 
     # creates the directories if not exist
-    save_path += f"cam{cam_idx}/"
-    if save_path:
-        os.makedirs(save_path, exist_ok=True)
+    save_dir = photo_dir + f"cam{cam_idx}/"
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
 
     print(f"Camera {cam_idx} taking pic")
-    start_time = time.perf_counter()
     ret, frame = cap.read()
     if not ret:
         print("Cannot recieve frame.")
     else:
-        end_time = time.perf_counter()
-        duration = end_time - start_time
-        print(f"Camera {cam_idx} pic taken in {duration} seconds")
 
-        start_time = time.perf_counter()
-        cv2.imwrite(f'{save_path}{timestamp}_cam{cam_idx}_{str(pic_num)}.jpg', frame) # pics/cam1/timestamp_cam1_
-        end_time = time.perf_counter()
-        duration = end_time - start_time
+
+        filename = f'{save_dir}{timestamp}_cam{cam_idx}_{str(pic_num)}.jpg' # pics/cam1/timestamp_cam1_
+        cv2.imwrite(filename, frame) 
         pic_num += 1
-        print(f"Camera {cam_idx} pic saved in {duration} seconds")
+
+        # If we have current_location then we can embed
+        if current_location and current_location.get('lat') and current_location.get('lon'):
+        # build and inject EXIF
+            lon_deg = current_location['lon']
+            lat_deg = current_location['lat']
+            # Build dict
+            gps_ifd = {
+                piexif.GPSIFD.GPSLatitudeRef: 'N' if lat_deg >= 0 else 'S',
+                piexif.GPSIFD.GPSLatitude: _decimal_to_dms(lat_deg),
+                piexif.GPSIFD.GPSLongitudeRef: 'E' if lon_deg >= 0 else 'W',
+                piexif.GPSIFD.GPSLongitude: _decimal_to_dms(lon_deg)
+            }
+            # Serialize dict to bytes
+            exif_dict = {'GPS': gps_ifd}
+            exif_bytes = piexif.dump(exif_dict)
+
+            # Inject bytes to picture
+            piexif.insert(exif_bytes, filename)
 
 
 
+def _decimal_to_dms(decimal):
+    decimal = abs(decimal)
+    degrees = int(decimal)
+    minutes = int((decimal - degrees) * 60)
+    seconds = round((decimal - degrees - minutes/60) * 3600 * 1000)
+    return ((degrees, 1), (minutes, 1), (seconds, 1000))
 
 
-def set_cam_ctrls(cap, width, height, exposure, gain, brightness, contrast):
+def _set_cam_ctrls(cap, width, height, exposure, gain, brightness, contrast):
     """
     Given the params and capture obj, will set the desired controls for the cap
 
@@ -108,7 +126,7 @@ def set_cam_ctrls(cap, width, height, exposure, gain, brightness, contrast):
 
 
 
-def main(stop_flag: Event):
+def main(stop_flag: Event, current_location: dict):
 
     caps_array = []
     try:
@@ -129,7 +147,7 @@ def main(stop_flag: Event):
         while True:
             
             for cam_idx, cap in enumerate(caps_array):
-                take_picture(cap, cam_idx, PHOTO_DIR)
+                take_picture(cap, cam_idx, PHOTO_DIR, current_location)
             
             if stop_flag.is_set():
                 print("Stop flag set, exiting capture loop.")
