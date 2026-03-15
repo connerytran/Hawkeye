@@ -3,3 +3,4 @@ pics/
 venv
 __pycache__
 .venv
+node_modules/

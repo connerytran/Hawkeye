@@ -127,6 +127,7 @@ class PiCamera:
             status = self.transfer_client.get_task(self.task_id)
             data = status.data
             return {
+                'status': data['status'],
                 'nice_status': data['nice_status'],
                 'task_id': data['task_id'],
                 'files': data['files'],
