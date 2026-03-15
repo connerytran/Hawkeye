@@ -21,7 +21,8 @@
 
 ## 🖥️ Laptop Backend + Frontend
 - [x] Wire up the laptop backend to the working Pi endpoints
-- [ ] Connect the Hawkeye frontend to the laptop backend
+- [x] Connect the Hawkeye frontend to the laptop backend
+- [ ] Allow for frontend to read from an env file for ip addresses initialization 
 
 ## ⚙️ Reliability
 - [ ] Create a systemd service file for the FastAPI Pi server so it starts on boot

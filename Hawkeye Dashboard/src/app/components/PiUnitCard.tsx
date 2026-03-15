@@ -1,9 +1,9 @@
-import { Play, Square, ArrowUpDown, Trash2, Edit2, Check, X } from "lucide-react";
+import { Play, Square, ArrowUpDown, Trash2, Edit2, Check, X, Camera, Loader2 } from "lucide-react";
 import { Checkbox } from "./ui/checkbox";
 import { Button } from "./ui/button";
 import { useState } from "react";
 
-export type PiStatus = "online" | "offline" | "busy" | "error";
+export type PiStatus = "online" | "offline" | "busy" | "error" | "connecting";
 
 export interface TransferInfo {
   status: string;       // machine-readable: ACTIVE, SUCCEEDED, FAILED, INACTIVE
@@ -34,6 +34,11 @@ interface PiUnitCardProps {
   onRemove: () => void;
   onRename: (newId: string) => void;
   onUpdateIp: (newIp: string) => void;
+  isDragging?: boolean;
+  isDragOver?: boolean;
+  onDragStart: () => void;
+  onDragOver: () => void;
+  onDragEnd: () => void;
 }
 
 const statusConfig = {
@@ -52,6 +57,10 @@ const statusConfig = {
   error: {
     label: "Error",
     className: "bg-red-600/10 text-red-600 border border-red-600/20",
+  },
+  connecting: {
+    label: "Connecting...",
+    className: "bg-blue-500/10 text-blue-600 border border-blue-500/20 animate-pulse",
   },
 };
 
@@ -73,6 +82,11 @@ export function PiUnitCard({
   onRemove,
   onRename,
   onUpdateIp,
+  isDragging = false,
+  isDragOver = false,
+  onDragStart,
+  onDragOver,
+  onDragEnd,
 }: PiUnitCardProps) {
   const statusStyle = statusConfig[unit.status];
   const isOffline = unit.status === "offline";
@@ -99,91 +113,50 @@ export function PiUnitCard({
     e.stopPropagation(); // Prevent double-toggle
   };
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [newId, setNewId] = useState(unit.id);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editName, setEditName] = useState(unit.id);
+  const [editIp, setEditIp] = useState(unit.ipAddress);
 
-  const handleEditClick = (e: React.MouseEvent) => {
+  const handleInputClick = (e: React.MouseEvent) => e.stopPropagation();
+
+  const openEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsEditing(true);
+    setEditName(unit.id);
+    setEditIp(unit.ipAddress);
+    setIsEditMode(true);
   };
 
-  const handleSaveClick = (e: React.MouseEvent) => {
+  const saveEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (newId.trim() && newId !== unit.id) {
-      onRename(newId.trim());
-    }
-    setIsEditing(false);
+    if (editName.trim() && editName !== unit.id) onRename(editName.trim());
+    if (editIp.trim() && editIp !== unit.ipAddress) onUpdateIp(editIp.trim());
+    setIsEditMode(false);
   };
 
-  const handleCancelClick = (e: React.MouseEvent) => {
+  const cancelEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setNewId(unit.id);
-    setIsEditing(false);
+    setIsEditMode(false);
   };
 
-  const handleInputClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      if (newId.trim() && newId !== unit.id) {
-        onRename(newId.trim());
-      }
-      setIsEditing(false);
-    } else if (e.key === 'Escape') {
-      setNewId(unit.id);
-      setIsEditing(false);
-    }
-  };
-
-  const [isEditingIp, setIsEditingIp] = useState(false);
-  const [newIp, setNewIp] = useState(unit.ipAddress);
-
-  const handleEditIpClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setNewIp(unit.ipAddress);
-    setIsEditingIp(true);
-  };
-
-  const handleSaveIpClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (newIp.trim() && newIp !== unit.ipAddress) {
-      onUpdateIp(newIp.trim());
-    }
-    setIsEditingIp(false);
-  };
-
-  const handleCancelIpClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setNewIp(unit.ipAddress);
-    setIsEditingIp(false);
-  };
-
-  const handleIpKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      if (newIp.trim() && newIp !== unit.ipAddress) {
-        onUpdateIp(newIp.trim());
-      }
-      setIsEditingIp(false);
-    } else if (e.key === 'Escape') {
-      setNewIp(unit.ipAddress);
-      setIsEditingIp(false);
-    }
+  const handleEditKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') saveEdit(e as unknown as React.MouseEvent);
+    else if (e.key === 'Escape') { setIsEditMode(false); }
   };
 
   return (
     <div
+      draggable={!isEditMode}
       onClick={handleCardClick}
+      onDragStart={(e) => { if (isEditMode) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = "move"; onDragStart(); }}
+      onDragOver={(e) => { e.preventDefault(); onDragOver(); }}
+      onDragEnd={onDragEnd}
       className={`
         relative rounded-xl bg-white border-2 shadow-sm
-        transition-all duration-200 ease-out
-        ${isOffline ? 'cursor-default' : 'cursor-pointer hover:shadow-lg hover:-translate-y-0.5'}
-        ${
-          selected
-            ? "border-red-600 shadow-[0_0_0_3px_rgba(204,0,0,0.1)]"
-            : "border-gray-200 hover:border-gray-300"
-        }
+        transition-all duration-200 ease-out select-none
+        ${isDragging ? 'opacity-40 scale-95' : ''}
+        ${isDragOver ? 'border-red-400 shadow-[0_0_0_3px_rgba(204,0,0,0.15)] -translate-y-1' : ''}
+        ${!isDragging && !isDragOver ? (isOffline ? 'cursor-grab' : 'cursor-grab hover:shadow-lg hover:-translate-y-0.5') : ''}
+        ${selected && !isDragOver ? "border-red-600 shadow-[0_0_0_3px_rgba(204,0,0,0.1)]" : !isDragOver ? "border-gray-200 hover:border-gray-300" : ""}
       `}
     >
       {/* Checkbox */}
@@ -196,50 +169,40 @@ export function PiUnitCard({
         />
       </div>
 
+      {/* Top-right edit controls */}
+      <div className="absolute top-3 right-3 z-10 flex gap-1" onClick={(e) => e.stopPropagation()}>
+        {isEditMode ? (
+          <>
+            <Button variant="ghost" size="sm" onClick={saveEdit} className="p-1 h-7 w-7 hover:bg-green-50">
+              <Check className="h-3.5 w-3.5 text-green-600" />
+            </Button>
+            <Button variant="ghost" size="sm" onClick={cancelEdit} className="p-1 h-7 w-7 hover:bg-red-50">
+              <X className="h-3.5 w-3.5 text-red-600" />
+            </Button>
+          </>
+        ) : (
+          <Button variant="ghost" size="sm" onClick={openEdit} className="p-1 h-7 w-7 hover:bg-gray-100 opacity-50 hover:opacity-100">
+            <Edit2 className="h-3.5 w-3.5 text-gray-600" />
+          </Button>
+        )}
+      </div>
+
       {/* Card Content */}
       <div className="p-6 pt-12">
         {/* Unit ID */}
         <div className="flex items-center gap-2 mb-3">
-          {isEditing ? (
-            <div className="flex items-center gap-1 flex-1">
-              <input
-                type="text"
-                value={newId}
-                onChange={(e) => setNewId(e.target.value)}
-                onClick={handleInputClick}
-                onKeyDown={handleKeyDown}
-                className="font-mono text-lg flex-1 border border-red-600 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-red-600"
-                autoFocus
-              />
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleSaveClick}
-                className="p-0.5 h-6 w-6 hover:bg-green-50"
-              >
-                <Check className="h-3 w-3 text-green-600" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleCancelClick}
-                className="p-0.5 h-6 w-6 hover:bg-red-50"
-              >
-                <X className="h-3 w-3 text-red-600" />
-              </Button>
-            </div>
+          {isEditMode ? (
+            <input
+              type="text"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              onClick={handleInputClick}
+              onKeyDown={handleEditKeyDown}
+              className="font-mono text-lg flex-1 border border-red-600 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-red-600"
+              autoFocus
+            />
           ) : (
-            <>
-              <h3 className="font-mono text-lg font-semibold">{unit.id}</h3>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleEditClick}
-                className="p-1 h-6 w-6 hover:bg-gray-100 opacity-60 hover:opacity-100"
-              >
-                <Edit2 className="h-3.5 w-3.5 text-gray-600" />
-              </Button>
-            </>
+            <h3 className="font-mono text-lg font-semibold">{unit.id}</h3>
           )}
         </div>
 
@@ -255,61 +218,44 @@ export function PiUnitCard({
         {/* IP Address */}
         <div className="mb-3">
           <p className="text-xs text-gray-500 mb-1">IP Address</p>
-          {isEditingIp ? (
-            <div className="flex items-center gap-1">
-              <input
-                type="text"
-                value={newIp}
-                onChange={(e) => setNewIp(e.target.value)}
-                onClick={handleInputClick}
-                onKeyDown={handleIpKeyDown}
-                className="font-mono text-sm flex-1 border border-red-600 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-red-600"
-                autoFocus
-              />
-              <Button variant="ghost" size="sm" onClick={handleSaveIpClick} className="p-0.5 h-6 w-6 hover:bg-green-50">
-                <Check className="h-3 w-3 text-green-600" />
-              </Button>
-              <Button variant="ghost" size="sm" onClick={handleCancelIpClick} className="p-0.5 h-6 w-6 hover:bg-red-50">
-                <X className="h-3 w-3 text-red-600" />
-              </Button>
-            </div>
+          {isEditMode ? (
+            <input
+              type="text"
+              value={editIp}
+              onChange={(e) => setEditIp(e.target.value)}
+              onClick={handleInputClick}
+              onKeyDown={handleEditKeyDown}
+              className="font-mono text-sm w-full border border-red-600 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-red-600"
+            />
           ) : (
-            <div className="flex items-center gap-1">
-              <p className="text-sm font-mono text-gray-900">{unit.ipAddress}</p>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleEditIpClick}
-                className="p-1 h-6 w-6 hover:bg-gray-100 opacity-60 hover:opacity-100"
-              >
-                <Edit2 className="h-3 w-3 text-gray-600" />
-              </Button>
-            </div>
+            <p className="text-sm font-mono text-gray-900">{unit.ipAddress}</p>
           )}
         </div>
 
-        {/* Last Response */}
-        <div className="mb-4">
-          <p className="text-xs font-mono text-gray-500">
-            {unit.lastResponse} · {unit.lastResponseTime}
-          </p>
-        </div>
-
-        {/* Capture Status Bar */}
-        <div className="mb-3">
-          <div className="flex justify-between items-center mb-1">
-            <span className="text-xs text-gray-500">Capture</span>
-            <span className="text-xs font-medium text-gray-700">
-              {unit.status === "busy" ? "Active" : unit.status === "offline" ? "—" : "Idle"}
-            </span>
-          </div>
-          <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+        {/* Capture Status Indicator */}
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-xs text-gray-500">Capture</span>
+          <div className="flex items-center gap-1.5">
             {unit.status === "busy" ? (
-              <div className="h-full w-full bg-amber-500 rounded-full animate-[captureSlide_1.5s_ease-in-out_infinite]" />
+              <>
+                <Loader2 className="h-3.5 w-3.5 text-amber-500 animate-spin" />
+                <span className="text-xs font-medium text-amber-600">Active</span>
+              </>
             ) : unit.status === "online" ? (
-              <div className="h-full w-1/4 bg-emerald-400 rounded-full" />
+              <>
+                <Camera className="h-3.5 w-3.5 text-emerald-400" />
+                <span className="text-xs font-medium text-gray-500">Idle</span>
+              </>
+            ) : unit.status === "connecting" ? (
+              <>
+                <Camera className="h-3.5 w-3.5 text-blue-300 animate-pulse" />
+                <span className="text-xs font-medium text-gray-400">—</span>
+              </>
             ) : (
-              <div className="h-full w-0" />
+              <>
+                <Camera className="h-3.5 w-3.5 text-gray-300" />
+                <span className="text-xs font-medium text-gray-400">—</span>
+              </>
             )}
           </div>
         </div>
