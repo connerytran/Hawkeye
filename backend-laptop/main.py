@@ -22,21 +22,8 @@ app.add_middleware(
 )
 
 
-# pi_port = os.getenv('pi_port')
-pi_port = 5000
-# num_of_pis = int(os.getenv('num_of_pis'))
-pi_hosts = ['localhost','192.168.2.97']
-# online_pis = []
-# invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*', ' ', '.']
-
-
-# adds in all ip addresses of pis
-# for i in range(num_of_pis):
-#   host = os.getenv(f'pi_host_{i}')
-#   if host:
-#     pi_hosts.append(host)
-#   else: 
-#     print("No good")
+PI_PORT = 5000
+pi_hosts = ['localhost']
 
 
 
@@ -44,21 +31,25 @@ pi_hosts = ['localhost','192.168.2.97']
 class PiRequest(BaseModel):
     pis: list[str]
 
+class GlobusRequest(BaseModel):
+    pis: list[str]
+    foldername: str
 
 
 
-@app.get('/status')
-async def status(pis: list[str] = None):
+@app.post('/capture-status')
+async def capture_status(request: PiRequest):
     """
     TODO
     """
+    pis = request.pis
     if pis is None:
         pis = pi_hosts
     results = {}
     status = None
 
     for pi in pis: 
-        url = f"http://{pi}:{pi_port}/status"
+        url = f"http://{pi}:{PI_PORT}/capture-status"
         
         try:
             #The requests.get() function sends an HTTP GET request
@@ -97,7 +88,7 @@ async def start_capture(request: PiRequest):
     status = None
 
     for pi in pis: 
-        url = f"http://{pi}:{pi_port}/start-capture"
+        url = f"http://{pi}:{PI_PORT}/start-capture"
         
         try:
             #The requests.post() function sends an HTTP POST request
@@ -135,7 +126,7 @@ async def stop_capture(request: PiRequest):
     status = None
 
     for pi in pis: 
-        url = f"http://{pi}:{pi_port}/stop-capture"
+        url = f"http://{pi}:{PI_PORT}/stop-capture"
         
         try:
             #The requests.post() function sends an HTTP POST request
@@ -162,23 +153,61 @@ async def stop_capture(request: PiRequest):
     }
 
 
+@app.delete('/delete-photos')
+async def delete_photos(request: PiRequest):
+    """
+    TODO
+    """
+    pis = request.pis
+    if pis is None:
+        pis = pi_hosts
+    results = {}
+    status = None
+
+    for pi in pis: 
+        url = f"http://{pi}:{PI_PORT}/delete-photos"
+        
+        try:
+            #The requests.get() function sends an HTTP GET request
+            response = requests.delete(url, timeout=5) # Set a 5-second timeout
+
+            # Check for a successful HTTP status code 
+            if response.status_code == 200:
+                results[pi] = response.json() 
+                status = 'success'
+            else:
+                # Handle non-200 status codes (e.g., 500 server error) PI DOES RESPOND
+                results[pi] = {'error' : response.json()}
+                status = 'Pi Response: error'
+
+        except Exception as e:
+            # Handle network errors (Pi is off, wrong IP, etc.) PI DOESN'T RESPOND
+            results[pi] = {"error": str(e)}
+            status = 'Error: pi did not respond'
+
+    return {
+        'status' : status,
+       'results' : results
+    }
+
 
 
 @app.post('/globus-transfer')
-async def stop_capture(request: PiRequest):
+async def globus_transfer(request: GlobusRequest):
     """
     TODO
     """
     pis = request.pis 
     results = {}
+    foldername = request.foldername
     status = None
 
     for pi in pis: 
-        url = f"http://{pi}:{pi_port}/globus-transfer"
+        url = f"http://{pi}:{PI_PORT}/globus-transfer"
         
         try:
             #The requests.post() function sends an HTTP POST request
-            response = requests.post(url, timeout=5) 
+            response = requests.post(url, params={'foldername': foldername}, timeout=5) 
 
             # Check for a successful HTTP status code 
             if response.status_code == 200:
@@ -199,6 +228,46 @@ async def stop_capture(request: PiRequest):
         'status' : status,
         'results' : results
     }
+
+
+
+@app.post('/transfer-status')
+async def transfer_status(request: PiRequest):
+    """
+    TODO
+    """
+    pis = request.pis
+    if pis is None:
+        pis = pi_hosts
+    results = {}
+    status = None
+
+    for pi in pis: 
+        url = f"http://{pi}:{PI_PORT}/transfer-status"
+        
+        try:
+            #The requests.get() function sends an HTTP GET request
+            response = requests.get(url, timeout=5) # Set a 5-second timeout
+
+            # Check for a successful HTTP status code 
+            if response.status_code == 200:
+                results[pi] = response.json() 
+                status = 'success'
+            else:
+                # Handle non-200 status codes (e.g., 500 server error) PI DOES RESPOND
+                results[pi] = {'error' : response.json()}
+                status = 'Pi Response: error'
+
+        except Exception as e:
+            # Handle network errors (Pi is off, wrong IP, etc.) PI DOESN'T RESPOND
+            results[pi] = {"error": str(e)}
+            status = 'Error: pi did not respond'
+
+    return {
+        'status' : status,
+       'results' : results
+    }
+
 
 
 

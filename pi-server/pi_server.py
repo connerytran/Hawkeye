@@ -1,11 +1,16 @@
 from fastapi import FastAPI
 from fastapi import HTTPException
 from PiCamera import PiCamera
+from pydantic import BaseModel
 import uvicorn
 
 
 app = FastAPI()
 Pi_Camera = PiCamera()
+
+
+class GlobusRequest(BaseModel):
+    foldername: str
 
 
 @app.get("/capture-status")
@@ -44,10 +49,15 @@ async def stop_capture():
 
 
 
+@app.delete("/delete-photos")
+async def delete_photos():
+    message = Pi_Camera.delete_photos()
+    return message
+
 
 @app.post("/globus-transfer")
-async def globus_transfer(foldername: str):
-
+async def globus_transfer(request: GlobusRequest):
+    foldername = request.foldername
     if not _is_valid_foldername(foldername):
         raise HTTPException(status_code=400, detail="Folder name invalid")
 
@@ -56,12 +66,11 @@ async def globus_transfer(foldername: str):
 
 
 
-@app.get("/upload-status")
-async def upload_status():
+@app.get("/transfer-status")
+async def transfer_status():
+    transfer_status = Pi_Camera.get_transfer_status()
+    return transfer_status
 
-    upload_status = Pi_Camera.get_transfer_status()
-    
-    return upload_status
 
 
 def _is_valid_foldername(name: str) -> bool:

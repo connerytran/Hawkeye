@@ -7,6 +7,7 @@ from datetime import datetime
 from threading import Event, Thread
 import cam_capture
 from utils import gps_reader
+import shutil
 
 load_dotenv(dotenv_path="/home/tomato-imager/TomatoImager/.env")
 
@@ -69,6 +70,13 @@ class PiCamera:
             return {"error": f"Failed to stop capture: {str(e)}"}
         
 
+    def delete_photos(self):
+        for folder in os.listdir(SRC_PATH):
+            folder_path = os.path.join(SRC_PATH, folder)
+            if os.path.isdir(folder_path):
+                shutil.rmtree(folder_path)
+        return {"message": "Photos deleted."}
+
     def get_capture_status(self):
         capture_status = ""
         if self.capture_thread is None: 
@@ -117,6 +125,20 @@ class PiCamera:
 
         try:
             status = self.transfer_client.get_task(self.task_id)
-            return dict(status.data)
+            data = status.data
+            return {
+                'nice_status': data['nice_status'],
+                'task_id': data['task_id'],
+                'files': data['files'],
+                'files_transferred': data['files_transferred'],
+                'bytes_transferred': data['bytes_transferred'],
+                'subtasks_succeeded': data['subtasks_succeeded'],
+                'subtasks_total': data['subtasks_total'],
+                'faults': data['faults'],
+                'fatal_error': data['fatal_error'],
+                'completion_time': data['completion_time'],
+                'request_time': data['request_time'],
+                'effective_bytes_per_second': data['effective_bytes_per_second'],
+            }
         except Exception as e:
             return {"error": f"Failed to get transfer status: {str(e)}"}
