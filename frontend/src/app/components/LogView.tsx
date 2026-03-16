@@ -3,6 +3,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Trash2 } from "lucide-react";
 
 export interface LogEntry {
+  id: number;           // stable identity — never changes after creation
   timestamp: string;
   unitId: string;
   action: string;
@@ -143,16 +144,16 @@ export function LogView({ logs, onClear }: LogViewProps) {
       )}
 
       {/* ── Log entries ── */}
-      <ScrollArea className="h-56">
+      <ScrollArea className="h-80">
         <div className="p-4 space-y-0.5">
           {filtered.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-8">
               {logs.length === 0 ? "No activity logged yet" : "No entries match the current filters"}
             </p>
           ) : (
-            filtered.map((log, index) => (
+            filtered.map((log) => (
               <div
-                key={index}
+                key={log.id}
                 className="flex items-start gap-3 text-xs font-mono py-1.5 px-3 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 <span className={`mt-1.5 flex-shrink-0 w-1.5 h-1.5 rounded-full ${typeConfig[log.type].dot}`} />

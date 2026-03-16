@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Play, Square, ArrowUpDown, RefreshCw, Plus } from "lucide-react";
+import { Play, Square, ArrowUpDown, RefreshCw, Plus, Camera, ChevronDown, Eraser } from "lucide-react";
 import { PiUnitCard, PiUnit, PiStatus, TransferInfo } from "./components/PiUnitCard";
 import { LogView, LogEntry } from "./components/LogView";
 import { Checkbox } from "./components/ui/checkbox";
 import { Button } from "./components/ui/button";
-import ncsuLogo from "../assets/Ncsu_psi.png";
+import ncsuLogo from "../assets/ncsu_logo.png";
 
 const BACKEND_URL = "http://localhost:8000";
 
@@ -15,6 +15,7 @@ const initialPiUnits: PiUnit[] = [
     lastResponse: "—",
     lastResponseTime: "—",
     ipAddress: "192.168.2.97",
+    autoClear: false,
   },
 ];
 
@@ -47,6 +48,8 @@ export default function App() {
   const [piUnits, setPiUnits] = useState<PiUnit[]>(initialPiUnits);
   const piUnitsRef = useRef(piUnits);
   useEffect(() => { piUnitsRef.current = piUnits; }, [piUnits]);
+  const isPollRunning = useRef(false);
+  const logIdRef = useRef(0);
 
   const [selectedUnits, setSelectedUnits] = useState<Set<string>>(new Set());
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -56,12 +59,26 @@ export default function App() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [bulkCaptureOpen, setBulkCaptureOpen] = useState(false);
+  const [bulkTransferOpen, setBulkTransferOpen] = useState(false);
+  const bulkCaptureRef = useRef<HTMLDivElement>(null);
+  const bulkTransferRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (!bulkCaptureRef.current?.contains(e.target as Node)) setBulkCaptureOpen(false);
+      if (!bulkTransferRef.current?.contains(e.target as Node)) setBulkTransferOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const MAX_LOG_ENTRIES = 200;
 
   function addLog(unitId: string, action: string, message: string, type: "success" | "error" | "info") {
+    const id = ++logIdRef.current;
     setLogs((prev) => {
-      const next = [{ timestamp: getTimestamp(), unitId, action, message, type }, ...prev];
+      const next = [{ id, timestamp: getTimestamp(), unitId, action, message, type }, ...prev];
       return next.length > MAX_LOG_ENTRIES ? next.slice(0, MAX_LOG_ENTRIES) : next;
     });
   }
@@ -78,9 +95,13 @@ export default function App() {
 
   // ===== REFRESH / STATUS =====
   const pollStatuses = useCallback(async (silent = false, overrideIps?: string[]) => {
+    // Skip overlapping background polls — if a poll is already running, bail out silently
+    if (silent && isPollRunning.current) return;
+    isPollRunning.current = true;
+
     const currentUnits = piUnitsRef.current;
     const ips = overrideIps ?? currentUnits.map((u) => u.ipAddress);
-    if (ips.length === 0) return;
+    if (ips.length === 0) { isPollRunning.current = false; return; }
 
     try {
       const [captureRes, transferRes] = await Promise.all([
@@ -98,74 +119,89 @@ export default function App() {
       const captureData = await captureRes.json();
       const transferData = await transferRes.json();
 
-      // Build updated units and detect ACTIVE→SUCCEEDED transitions for auto-delete
-      const justCompleted: string[] = [];
+      // Use the latest ref snapshot for transition logging and auto-clear detection
+      const snapshot = piUnitsRef.current;
+      const autoClearIps: string[] = [];
 
-      const updatedUnits = currentUnits.map((unit) => {
+      snapshot.forEach((unit) => {
         const captureResult = captureData.results?.[unit.ipAddress];
         const transferResult = transferData.results?.[unit.ipAddress];
 
         if (!captureResult || captureResult.error) {
           if (unit.status !== "offline") {
-            const reason = extractError(captureResult?.error);
-            addLog(unit.id, "Connection", `Went offline — ${reason}`, "error");
+            addLog(unit.id, "Connection", `Went offline — ${extractError(captureResult?.error)}`, "error");
           }
-          return { ...unit, status: "offline" as PiStatus, lastResponse: "Offline", lastResponseTime: "just now", transfer: null };
+        } else {
+          if (unit.status === "offline" || unit.status === "connecting") {
+            addLog(unit.id, "Connection", "Back online", "success");
+          }
+          // Auto-clear: only fire when the unit has autoClear enabled and transfer just completed
+          if (
+            unit.autoClear &&
+            unit.transfer?.status === "ACTIVE" &&
+            transferResult?.status === "SUCCEEDED"
+          ) {
+            autoClearIps.push(unit.ipAddress);
+          }
         }
-        if (unit.status === "offline") {
-          addLog(unit.id, "Connection", "Back online", "success");
-        }
-        const capturing = captureResult.capture_status === "Capturing";
-
-        const transfer: TransferInfo | null =
-          transferResult && !transferResult.error
-            ? {
-                status: transferResult.status ?? "",
-                nice_status: transferResult.nice_status ?? "",
-                files: transferResult.files ?? 0,
-                files_transferred: transferResult.files_transferred ?? 0,
-                bytes_transferred: transferResult.bytes_transferred ?? 0,
-                subtasks_succeeded: transferResult.subtasks_succeeded ?? 0,
-                subtasks_total: transferResult.subtasks_total ?? 0,
-              }
-            : null;
-
-        // Detect transition: was ACTIVE, now SUCCEEDED
-        if (unit.transfer?.status === "ACTIVE" && transfer?.status === "SUCCEEDED") {
-          justCompleted.push(unit.ipAddress);
-        }
-
-        return {
-          ...unit,
-          status: capturing ? ("busy" as PiStatus) : ("online" as PiStatus),
-          lastResponse: captureResult.capture_status,
-          lastResponseTime: "just now",
-          transfer,
-        };
       });
 
-      setPiUnits(updatedUnits);
+      // Use functional updater so we always apply against the *latest* state.
+      // This means drag reorders or renames that happened while the fetch was
+      // in-flight are preserved — we only overwrite status/transfer fields.
+      setPiUnits((latest) =>
+        latest.map((unit) => {
+          const captureResult = captureData.results?.[unit.ipAddress];
+          const transferResult = transferData.results?.[unit.ipAddress];
 
-      // Auto-delete photos on completed transfers
-      if (justCompleted.length > 0) {
+          if (!captureResult || captureResult.error) {
+            return { ...unit, status: "offline" as PiStatus, transfer: null };
+          }
+
+          const capturing = captureResult.capture_status === "Capturing";
+          const transfer: TransferInfo | null =
+            transferResult && !transferResult.error
+              ? {
+                  status: transferResult.status ?? "",
+                  nice_status: transferResult.nice_status ?? "",
+                  files: transferResult.files ?? 0,
+                  files_transferred: transferResult.files_transferred ?? 0,
+                  bytes_transferred: transferResult.bytes_transferred ?? 0,
+                  subtasks_succeeded: transferResult.subtasks_succeeded ?? 0,
+                  subtasks_total: transferResult.subtasks_total ?? 0,
+                }
+              : null;
+
+          return {
+            ...unit,
+            status: capturing ? ("busy" as PiStatus) : ("online" as PiStatus),
+            transfer,
+          };
+        })
+      );
+
+      // Fire auto-clear for units that just completed transfer with autoClear enabled
+      if (autoClearIps.length > 0) {
         try {
           await fetch(`${BACKEND_URL}/delete-photos`, {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pis: justCompleted }),
+            body: JSON.stringify({ pis: autoClearIps }),
           });
-          justCompleted.forEach((ip) => {
+          autoClearIps.forEach((ip) => {
             const unit = piUnitsRef.current.find((u) => u.ipAddress === ip);
-            addLog(unit?.id ?? ip, "Auto Clean", "Photos deleted after successful transfer", "success");
+            addLog(unit?.id ?? ip, "Auto Clear", "Photos deleted after successful transfer", "success");
           });
         } catch (e) {
-          addLog("System", "Auto Clean", `Failed to delete photos: ${e}`, "error");
+          addLog("System", "Auto Clear", `Failed to delete photos: ${extractError(e)}`, "error");
         }
       }
 
       if (!silent) addLog("System", "Refresh", "Status updated successfully", "success");
     } catch (e) {
       if (!silent) addLog("System", "Refresh", `Failed to refresh: ${e}`, "error");
+    } finally {
+      isPollRunning.current = false;
     }
   }, []);
 
@@ -176,9 +212,9 @@ export default function App() {
     setIsRefreshing(false);
   };
 
-  // Auto-refresh every 3 seconds in the background
+  // Auto-refresh every 2 seconds in the background
   useEffect(() => {
-    const interval = setInterval(() => pollStatuses(true), 3000);
+    const interval = setInterval(() => pollStatuses(true), 2000);
     return () => clearInterval(interval);
   }, [pollStatuses]);
 
@@ -271,6 +307,67 @@ export default function App() {
 
   };
 
+  // ===== TOGGLE AUTO-CLEAR =====
+  const handleToggleAutoClear = (unitId: string) => {
+    setPiUnits((prev) =>
+      prev.map((u) => (u.id === unitId ? { ...u, autoClear: !u.autoClear } : u))
+    );
+  };
+
+  // ===== BULK TOGGLE AUTO-CLEAR =====
+  // Compute allOn inside the functional updater so it always reads the latest state,
+  // not the ref (which lags one render behind via useEffect).
+  const handleBulkToggleAutoClear = () => {
+    setPiUnits((prev) => {
+      const allOn = [...selectedUnits].every((id) => prev.find((u) => u.id === id)?.autoClear);
+      return prev.map((u) => selectedUnits.has(u.id) ? { ...u, autoClear: !allOn } : u);
+    });
+  };
+
+  // ===== BULK CLEAR PHOTOS =====
+  const handleBulkClearPhotos = async () => {
+    const ips = getSelectedIps();
+    if (ips.length === 0) return;
+    addLog("System", "Clear Photos", `Deleting photos on ${ips.length} Pi(s)…`, "info");
+    try {
+      const res = await fetch(`${BACKEND_URL}/delete-photos`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pis: ips }),
+      });
+      const data = await res.json();
+      ips.forEach((ip) => {
+        const unit = piUnitsRef.current.find((u) => u.ipAddress === ip);
+        const label = unit?.id ?? ip;
+        const r = data.results?.[ip];
+        if (r?.error) addLog(label, "Clear Photos", extractError(r.error), "error");
+        else addLog(label, "Clear Photos", "Photos cleared successfully", "success");
+      });
+    } catch (e) {
+      addLog("System", "Clear Photos", extractError(e), "error");
+    }
+  };
+
+  // ===== CLEAR PHOTOS =====
+  const handleClearPhotos = async (unitId: string) => {
+    const unit = piUnitsRef.current.find((u) => u.id === unitId);
+    if (!unit) return;
+    addLog(unitId, "Clear Photos", `Deleting photos on ${unitId}…`, "info");
+    try {
+      const res = await fetch(`${BACKEND_URL}/delete-photos`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pis: [unit.ipAddress] }),
+      });
+      const data = await res.json();
+      const r = data.results?.[unit.ipAddress];
+      if (r?.error) addLog(unitId, "Clear Photos", extractError(r.error), "error");
+      else addLog(unitId, "Clear Photos", "Photos cleared successfully", "success");
+    } catch (e) {
+      addLog(unitId, "Clear Photos", extractError(e), "error");
+    }
+  };
+
   // ===== TRANSFER MODAL =====
   const openTransferModal = (target: "bulk" | string) => {
     setModalFolder("");
@@ -282,9 +379,12 @@ export default function App() {
     const { target } = transferModal;
     setTransferModal(null);
 
-    const ips = target === "bulk"
-      ? getSelectedIps()
-      : [piUnitsRef.current.find((u) => u.id === target)!.ipAddress];
+    const targetUnit = target !== "bulk" ? piUnitsRef.current.find((u) => u.id === target) : null;
+    if (target !== "bulk" && !targetUnit) {
+      addLog("System", "Globus Transfer", `Pi "${target}" no longer exists`, "error");
+      return;
+    }
+    const ips = target === "bulk" ? getSelectedIps() : [targetUnit!.ipAddress];
     const label = target === "bulk" ? "System" : target;
 
     addLog(label, "Globus Transfer", `Initiating transfer to folder: ${folder}`, "info");
@@ -339,7 +439,7 @@ export default function App() {
       return n > max ? n : max;
     }, 0);
     const newId = `Pi-${String(maxId + 1).padStart(2, "0")}`;
-    setPiUnits([...piUnits, { id: newId, status: "connecting" as PiStatus, lastResponse: "—", lastResponseTime: "—", ipAddress: newIpAddress }]);
+    setPiUnits([...piUnits, { id: newId, status: "connecting" as PiStatus, lastResponse: "—", lastResponseTime: "—", ipAddress: newIpAddress, autoClear: false }]);
     addLog(newId, "Add Pi", `Added new Pi unit at ${newIpAddress}`, "success");
     setNewIpAddress("");
   };
@@ -364,8 +464,13 @@ export default function App() {
   };
 
   const handleUpdateIp = (unitId: string, newIp: string) => {
+    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    if (!ipRegex.test(newIp)) {
+      addLog(unitId, "Update IP", `"${newIp}" is not a valid IP address`, "error");
+      return;
+    }
     if (piUnits.some((u) => u.ipAddress === newIp && u.id !== unitId)) {
-      addLog("System", "Update IP", `IP address ${newIp} already exists`, "error");
+      addLog(unitId, "Update IP", `IP address ${newIp} already in use`, "error");
       return;
     }
     const updatedUnits = piUnits.map((u) => (u.id === unitId ? { ...u, ipAddress: newIp } : u));
@@ -422,36 +527,100 @@ export default function App() {
               </span>
             </div>
 
-            <div className="flex gap-1 md:gap-2">
-              <Button variant="outline" size="sm" disabled={selectedCount === 0} onClick={() => handleBulkAction("Start Capture")}
-                className="border-red-600 text-red-600 hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed disabled:border-gray-300 disabled:text-gray-400 text-[10px] md:text-sm px-2 md:px-3">
-                <Play className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
-                <span className="hidden sm:inline">Start Capture</span>
-                <span className="sm:hidden">Start</span>
-              </Button>
-              <Button variant="outline" size="sm" disabled={selectedCount === 0} onClick={() => handleBulkAction("Stop Capture")}
-                className="border-red-600 text-red-600 hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed disabled:border-gray-300 disabled:text-gray-400 text-[10px] md:text-sm px-2 md:px-3">
-                <Square className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
-                <span className="hidden sm:inline">Stop Capture</span>
-                <span className="sm:hidden">Stop</span>
-              </Button>
-              <Button variant="outline" size="sm" disabled={selectedCount === 0} onClick={() => openTransferModal("bulk")}
-                className="border-red-600 text-red-600 hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed disabled:border-gray-300 disabled:text-gray-400 text-[10px] md:text-sm px-2 md:px-3">
-                <ArrowUpDown className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
-                <span className="hidden sm:inline">Globus Transfer</span>
-                <span className="sm:hidden">Transfer</span>
-              </Button>
-              <Button variant="outline" size="sm" disabled={isRefreshing} onClick={handleRefresh}
-                className="border-red-600 text-red-600 hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed disabled:border-gray-300 disabled:text-gray-400 text-[10px] md:text-sm px-2 md:px-3">
-                <RefreshCw className={`h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
-                <span className="hidden sm:inline">Refresh</span>
-              </Button>
+            {/* ── Bulk Capture Dropdown ── */}
+            <div className="relative" ref={bulkCaptureRef}>
+              <button
+                disabled={selectedCount === 0}
+                onClick={() => { setBulkCaptureOpen((o) => !o); setBulkTransferOpen(false); }}
+                className="flex items-center gap-1.5 text-[10px] md:text-sm px-2 md:px-3 py-1.5 md:py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <Camera className="h-3 w-3 md:h-4 md:w-4" />
+                <span className="hidden sm:inline">Capture</span>
+                <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${bulkCaptureOpen ? "rotate-180" : ""}`} />
+              </button>
+              {bulkCaptureOpen && (
+                <div className="absolute top-full mt-1 left-0 z-30 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden w-44">
+                  <button
+                    onClick={() => { setBulkCaptureOpen(false); handleBulkAction("Start Capture"); }}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <Play className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+                    Start Capture
+                  </button>
+                  <button
+                    onClick={() => { setBulkCaptureOpen(false); handleBulkAction("Stop Capture"); }}
+                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <Square className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
+                    Stop Capture
+                  </button>
+                </div>
+              )}
             </div>
+
+            {/* ── Bulk Transfer Dropdown ── */}
+            <div className="relative" ref={bulkTransferRef}>
+              <button
+                disabled={selectedCount === 0}
+                onClick={() => { setBulkTransferOpen((o) => !o); setBulkCaptureOpen(false); }}
+                className="flex items-center gap-1.5 text-[10px] md:text-sm px-2 md:px-3 py-1.5 md:py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <ArrowUpDown className="h-3 w-3 md:h-4 md:w-4" />
+                <span className="hidden sm:inline">Transfer</span>
+                <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${bulkTransferOpen ? "rotate-180" : ""}`} />
+              </button>
+              {bulkTransferOpen && (() => {
+                const selectedIds = [...selectedUnits];
+                // Read from piUnits state (not the ref) so the dropdown re-renders immediately on toggle
+                const activeCount = selectedIds.filter((id) => piUnits.find((u) => u.id === id)?.transfer?.status === "ACTIVE").length;
+                const allAutoClear = selectedIds.length > 0 && selectedIds.every((id) => piUnits.find((u) => u.id === id)?.autoClear);
+                const someAutoClear = selectedIds.some((id) => piUnits.find((u) => u.id === id)?.autoClear);
+                return (
+                  <div className="absolute top-full mt-1 left-0 z-30 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden w-52">
+                    <button
+                      onClick={() => { setBulkTransferOpen(false); openTransferModal("bulk"); }}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      <ArrowUpDown className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />
+                      Begin Transfer
+                    </button>
+                    <button
+                      onClick={() => { if (activeCount === 0) { setBulkTransferOpen(false); handleBulkClearPhotos(); } }}
+                      disabled={activeCount > 0}
+                      title={activeCount > 0 ? `${activeCount} Pi(s) are uploading` : undefined}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-amber-600 hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <Eraser className="h-3.5 w-3.5 flex-shrink-0" />
+                      Clear Photos
+                    </button>
+                    <div
+                      className="flex items-center gap-2 px-4 py-2.5 border-t border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors"
+                      onClick={handleBulkToggleAutoClear}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={allAutoClear}
+                        ref={(el) => { if (el) el.indeterminate = !allAutoClear && someAutoClear; }}
+                        onChange={() => {}}
+                        className="h-3.5 w-3.5 accent-red-600 pointer-events-none"
+                      />
+                      <span className="text-sm text-gray-600 select-none leading-tight">Auto-clear after upload</span>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <Button variant="outline" size="sm" disabled={isRefreshing} onClick={handleRefresh}
+              className="border-red-600 text-red-600 hover:bg-red-50 disabled:opacity-30 disabled:cursor-not-allowed disabled:border-gray-300 disabled:text-gray-400 text-[10px] md:text-sm px-2 md:px-3">
+              <RefreshCw className={`h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
+              <span className="hidden sm:inline">Refresh</span>
+            </Button>
           </div>
 
           {/* Logo */}
           <div className="flex items-center flex-shrink-0">
-            <img src={ncsuLogo} alt="NC State University" className="h-16 md:h-24" />
+            <img src={ncsuLogo} alt="NC State University" className="h-16 md:h-20" />
           </div>
         </div>
       </header>
@@ -468,36 +637,35 @@ export default function App() {
               onStartCapture={() => handleUnitAction(unit.id, "Start Capture")}
               onStopCapture={() => handleUnitAction(unit.id, "Stop Capture")}
               onGlobusTransfer={() => openTransferModal(unit.id)}
+              onClearPhotos={() => handleClearPhotos(unit.id)}
+              onToggleAutoClear={() => handleToggleAutoClear(unit.id)}
               onRemove={() => handleRemovePi(unit.id)}
               onRename={(newId) => handleRenamePi(unit.id, newId)}
               onUpdateIp={(newIp) => handleUpdateIp(unit.id, newIp)}
               isDragging={draggedId === unit.id}
               isDragOver={dragOverId === unit.id && draggedId !== unit.id}
               onDragStart={() => setDraggedId(unit.id)}
-              onDragOver={() => setDragOverId(unit.id)}
+              onDragOver={() => { if (dragOverId !== unit.id) setDragOverId(unit.id); }}
               onDragEnd={handleDragEnd}
             />
           ))}
         </div>
 
-        {/* Add Pi Unit */}
-        <div className="mt-8">
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={newIpAddress}
-              onChange={(e) => setNewIpAddress(e.target.value)}
-              placeholder="Enter IP address"
-              className="border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-red-600"
-              onKeyDown={(e) => e.key === "Enter" && handleAddPi()}
-            />
-            <Button variant="outline" size="sm" onClick={handleAddPi}
-              className="border-red-600 text-red-600 hover:bg-red-50 text-[10px] md:text-sm px-2 md:px-3">
-              <Plus className="h-3 w-3 md:h-4 md:w-4 mr-1 md:mr-2" />
-              <span className="hidden sm:inline">Add Pi Unit</span>
-              <span className="sm:hidden">Add</span>
-            </Button>
-          </div>
+        {/* Add Pi */}
+        <div className="mt-8 flex flex-wrap items-center gap-3">
+          <input
+            type="text"
+            value={newIpAddress}
+            onChange={(e) => setNewIpAddress(e.target.value)}
+            placeholder="Enter IP address"
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-600"
+            onKeyDown={(e) => e.key === "Enter" && handleAddPi()}
+          />
+          <Button variant="outline" size="sm" onClick={handleAddPi}
+            className="border-red-600 text-red-600 hover:bg-red-50 text-sm px-3 py-2">
+            <Plus className="h-4 w-4 mr-1.5" />
+            Add Pi Unit
+          </Button>
         </div>
 
         {/* Log View */}

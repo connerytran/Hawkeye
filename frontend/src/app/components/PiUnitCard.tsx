@@ -1,7 +1,7 @@
-import { Play, Square, ArrowUpDown, Trash2, Edit2, Check, X, Camera, Loader2 } from "lucide-react";
+import { Play, Square, ArrowUpDown, Trash2, Edit2, Check, X, Camera, Loader2, Eraser, ChevronDown } from "lucide-react";
 import { Checkbox } from "./ui/checkbox";
 import { Button } from "./ui/button";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 
 export type PiStatus = "online" | "offline" | "busy" | "error" | "connecting";
 
@@ -22,6 +22,7 @@ export interface PiUnit {
   lastResponseTime: string;
   ipAddress: string;
   transfer?: TransferInfo | null;
+  autoClear?: boolean;
 }
 
 interface PiUnitCardProps {
@@ -31,6 +32,8 @@ interface PiUnitCardProps {
   onStartCapture: () => void;
   onStopCapture: () => void;
   onGlobusTransfer: () => void;
+  onClearPhotos: () => void;
+  onToggleAutoClear: () => void;
   onRemove: () => void;
   onRename: (newId: string) => void;
   onUpdateIp: (newIp: string) => void;
@@ -79,6 +82,8 @@ export function PiUnitCard({
   onStartCapture,
   onStopCapture,
   onGlobusTransfer,
+  onClearPhotos,
+  onToggleAutoClear,
   onRemove,
   onRename,
   onUpdateIp,
@@ -90,16 +95,18 @@ export function PiUnitCard({
 }: PiUnitCardProps) {
   const statusStyle = statusConfig[unit.status];
   const isOffline = unit.status === "offline";
+  // connecting Pis are not yet reachable — treat them like offline for action purposes
+  const isUnavailable = isOffline || unit.status === "connecting";
 
   const handleCardClick = () => {
-    if (!isOffline) {
+    if (!isUnavailable) {
       onSelectChange(!selected);
     }
   };
 
   const handleButtonClick = (e: React.MouseEvent, action: () => void) => {
-    e.stopPropagation(); // Prevent card selection when clicking buttons
-    if (!isOffline) {
+    e.stopPropagation();
+    if (!isUnavailable) {
       action();
     }
   };
@@ -116,6 +123,9 @@ export function PiUnitCard({
   const [isEditMode, setIsEditMode] = useState(false);
   const [editName, setEditName] = useState(unit.id);
   const [editIp, setEditIp] = useState(unit.ipAddress);
+  const [ipError, setIpError] = useState(false);
+
+  const IP_REGEX = /^(\d{1,3}\.){3}\d{1,3}$/;
 
   const handleInputClick = (e: React.MouseEvent) => e.stopPropagation();
 
@@ -123,25 +133,48 @@ export function PiUnitCard({
     e.stopPropagation();
     setEditName(unit.id);
     setEditIp(unit.ipAddress);
+    setIpError(false);
     setIsEditMode(true);
   };
 
-  const saveEdit = (e: React.MouseEvent) => {
+  const saveEdit = (e: React.SyntheticEvent) => {
     e.stopPropagation();
-    if (editName.trim() && editName !== unit.id) onRename(editName.trim());
-    if (editIp.trim() && editIp !== unit.ipAddress) onUpdateIp(editIp.trim());
+    const newIp = editIp.trim();
+    if (newIp && newIp !== unit.ipAddress && !IP_REGEX.test(newIp)) {
+      setIpError(true);
+      return; // keep edit mode open so user can fix it
+    }
+    setIpError(false);
+    if (editName.trim() && editName.trim() !== unit.id) onRename(editName.trim());
+    if (newIp && newIp !== unit.ipAddress) onUpdateIp(newIp);
     setIsEditMode(false);
   };
 
-  const cancelEdit = (e: React.MouseEvent) => {
+  const cancelEdit = (e: React.SyntheticEvent) => {
     e.stopPropagation();
+    setIpError(false);
     setIsEditMode(false);
   };
 
   const handleEditKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') saveEdit(e as unknown as React.MouseEvent);
-    else if (e.key === 'Escape') { setIsEditMode(false); }
+    if (e.key === 'Enter') saveEdit(e);
+    else if (e.key === 'Escape') cancelEdit(e);
   };
+
+  // Dropdown state
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const captureDropRef = useRef<HTMLDivElement>(null);
+  const transferDropRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (!captureDropRef.current?.contains(e.target as Node)) setCaptureOpen(false);
+      if (!transferDropRef.current?.contains(e.target as Node)) setTransferOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   return (
     <div
@@ -153,6 +186,7 @@ export function PiUnitCard({
       className={`
         relative rounded-xl bg-white border-2 shadow-sm
         transition-all duration-200 ease-out select-none
+        ${(captureOpen || transferOpen) ? 'z-20' : 'z-0'}
         ${isDragging ? 'opacity-40 scale-95' : ''}
         ${isDragOver ? 'border-red-400 shadow-[0_0_0_3px_rgba(204,0,0,0.15)] -translate-y-1' : ''}
         ${!isDragging && !isDragOver ? (isOffline ? 'cursor-grab' : 'cursor-grab hover:shadow-lg hover:-translate-y-0.5') : ''}
@@ -164,7 +198,7 @@ export function PiUnitCard({
         <Checkbox
           checked={selected}
           onCheckedChange={onSelectChange}
-          disabled={isOffline}
+          disabled={isUnavailable}
           className="border-gray-300 data-[state=checked]:bg-red-600 data-[state=checked]:border-red-600 disabled:opacity-50 disabled:cursor-not-allowed"
         />
       </div>
@@ -219,14 +253,23 @@ export function PiUnitCard({
         <div className="mb-3">
           <p className="text-xs text-gray-500 mb-1">IP Address</p>
           {isEditMode ? (
-            <input
-              type="text"
-              value={editIp}
-              onChange={(e) => setEditIp(e.target.value)}
-              onClick={handleInputClick}
-              onKeyDown={handleEditKeyDown}
-              className="font-mono text-sm w-full border border-red-600 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-red-600"
-            />
+            <div>
+              <input
+                type="text"
+                value={editIp}
+                onChange={(e) => { setEditIp(e.target.value); setIpError(false); }}
+                onClick={handleInputClick}
+                onKeyDown={handleEditKeyDown}
+                className={`font-mono text-sm w-full border rounded px-2 py-0.5 focus:outline-none focus:ring-1 ${
+                  ipError
+                    ? "border-red-500 focus:ring-red-300 bg-red-50"
+                    : "border-red-600 focus:ring-red-600"
+                }`}
+              />
+              {ipError && (
+                <p className="text-[10px] text-red-500 mt-0.5">Invalid IP address format</p>
+              )}
+            </div>
           ) : (
             <p className="text-sm font-mono text-gray-900">{unit.ipAddress}</p>
           )}
@@ -263,25 +306,34 @@ export function PiUnitCard({
         {/* Upload / Transfer Status Bar */}
         {(() => {
           const t = unit.transfer;
-          const isActive = t?.status === "ACTIVE";
+          const isActive   = t?.status === "ACTIVE";
           const isSucceeded = t?.status === "SUCCEEDED";
-          const isFailed = t?.status === "FAILED";
+          const isFailed   = t?.status === "FAILED";
+          const isInactive = t?.status === "INACTIVE";
           const hasProgress = !!(t && t.subtasks_total > 0);
           const pct = hasProgress
             ? Math.round((t!.subtasks_succeeded / t!.subtasks_total) * 100)
             : isSucceeded ? 100 : 0;
 
+          const statusLabel = isActive && hasProgress
+            ? `${pct}%`
+            : isSucceeded  ? "Complete"
+            : isFailed     ? "Failed"
+            : isInactive   ? "Cancelled"
+            : t            ? (t.nice_status || t.status)
+            : "—";
+
           return (
-            <div className="mb-5">
+            <div className="mb-4">
               <div className="flex justify-between items-center mb-1">
                 <span className="text-xs text-gray-500">Upload</span>
-                <span className="text-xs font-medium text-gray-700">
-                  {t ? (hasProgress && isActive ? `${pct}%` : t.nice_status || t.status) : "—"}
+                <span className={`text-xs font-medium ${isFailed || isInactive ? "text-red-500" : isSucceeded ? "text-emerald-600" : "text-gray-700"}`}>
+                  {statusLabel}
                 </span>
               </div>
               <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-                {isFailed ? (
-                  <div className="h-full w-full rounded-full bg-red-500" />
+                {isFailed || isInactive ? (
+                  <div className="h-full w-full rounded-full bg-red-400" />
                 ) : isSucceeded ? (
                   <div className="h-full w-full rounded-full bg-emerald-500" />
                 ) : isActive && hasProgress ? (
@@ -306,47 +358,103 @@ export function PiUnitCard({
           );
         })()}
 
-        {/* Action Buttons */}
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={(e) => handleButtonClick(e, onStartCapture)}
-            disabled={isOffline}
-            className="flex-1 min-w-0 border-gray-300 bg-white hover:bg-gray-50 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-[10px] px-2"
-          >
-            <Play className="h-3 w-3 mr-0.5" />
-            Start
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={(e) => handleButtonClick(e, onStopCapture)}
-            disabled={isOffline}
-            className="flex-1 min-w-0 border-gray-300 bg-white hover:bg-gray-50 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-[10px] px-2"
-          >
-            <Square className="h-3 w-3 mr-0.5" />
-            Stop
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={(e) => handleButtonClick(e, onGlobusTransfer)}
-            disabled={isOffline}
-            className="flex-1 min-w-0 border-gray-300 bg-white hover:bg-gray-50 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed text-[10px] px-2"
-          >
-            <ArrowUpDown className="h-3 w-3 mr-0.5" />
-            Transfer
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
+        {/* Action Dropdowns */}
+        <div className="flex gap-2 items-center">
+
+          {/* ── Capture Controls ── */}
+          <div className="relative flex-1" ref={captureDropRef}>
+            <button
+              onClick={(e) => { e.stopPropagation(); if (!isUnavailable) { setCaptureOpen((o) => !o); setTransferOpen(false); } }}
+              disabled={isUnavailable}
+              className="w-full flex items-center justify-between gap-1 text-[10px] px-2 py-1.5 rounded border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <div className="flex items-center gap-1">
+                <Camera className="h-3 w-3" />
+                <span>Capture</span>
+              </div>
+              <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${captureOpen ? "rotate-180" : ""}`} />
+            </button>
+
+            {captureOpen && (
+              <div className="absolute top-full mt-1 left-0 right-0 z-50 bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setCaptureOpen(false); if (!isUnavailable) onStartCapture(); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <Play className="h-3 w-3 text-emerald-500 flex-shrink-0" />
+                  Start Capture
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setCaptureOpen(false); if (!isUnavailable) onStopCapture(); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <Square className="h-3 w-3 text-red-500 flex-shrink-0" />
+                  Stop Capture
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* ── Transfer Controls ── */}
+          <div className="relative flex-1" ref={transferDropRef}>
+            <button
+              onClick={(e) => { e.stopPropagation(); if (!isUnavailable) { setTransferOpen((o) => !o); setCaptureOpen(false); } }}
+              disabled={isUnavailable}
+              className="w-full flex items-center justify-between gap-1 text-[10px] px-2 py-1.5 rounded border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <div className="flex items-center gap-1">
+                <ArrowUpDown className="h-3 w-3" />
+                <span>Transfer</span>
+              </div>
+              <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${transferOpen ? "rotate-180" : ""}`} />
+            </button>
+
+            {transferOpen && (
+              <div className="absolute top-full mt-1 left-0 right-0 z-50 bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setTransferOpen(false); if (!isUnavailable) onGlobusTransfer(); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <ArrowUpDown className="h-3 w-3 text-blue-500 flex-shrink-0" />
+                  Begin Transfer
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); if (unit.transfer?.status !== "ACTIVE") { setTransferOpen(false); if (!isUnavailable) onClearPhotos(); } }}
+                  disabled={unit.transfer?.status === "ACTIVE"}
+                  title={unit.transfer?.status === "ACTIVE" ? "Cannot clear while upload is in progress" : undefined}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-amber-600 hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Eraser className="h-3 w-3 flex-shrink-0" />
+                  Clear Photos
+                </button>
+                <div
+                  className="flex items-center gap-2 px-3 py-2 border-t border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors"
+                  onClick={(e) => { e.stopPropagation(); onToggleAutoClear(); }}
+                >
+                  {/* pointer-events-none so all clicks route to the parent div — prevents double-toggle */}
+                  <input
+                    type="checkbox"
+                    checked={unit.autoClear ?? false}
+                    onChange={() => {}}
+                    className="h-3 w-3 accent-red-600 pointer-events-none"
+                  />
+                  <span className="text-[10px] text-gray-600 select-none leading-tight">
+                    Auto-clear after upload
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Remove icon button */}
+          <button
             onClick={handleRemoveClick}
-            className="flex-1 min-w-0 border-red-600 bg-white hover:bg-red-50 text-red-600 text-[10px] px-2"
+            title="Remove Pi"
+            className="p-1.5 rounded border border-red-200 text-red-400 hover:bg-red-50 hover:border-red-400 hover:text-red-600 transition-colors flex-shrink-0"
           >
-            <Trash2 className="h-3 w-3 mr-0.5" />
-            Remove
-          </Button>
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+
         </div>
       </div>
     </div>
