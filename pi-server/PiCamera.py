@@ -11,7 +11,8 @@ import shutil
 
 load_dotenv(dotenv_path="/home/tomato-imager/TomatoImager/.env")
 
-SRC_PATH = os.getenv("GLOBUS_SRC_PATH","/home/tomato-imager/TomatoImager/pics/")
+PHOTO_DIR = os.getenv('PHOTO_DIR')
+GLOBUS_SRC_PATH = os.getenv("GLOBUS_SRC_PATH","/home/tomato-imager/TomatoImager/pics/")
 DEST_PATH ="/rs1/shares/cals-research-station/clinton/hawkeye/"
 CLIENT_ID = os.getenv('CLIENT_ID')
 SOURCE_COLLECTION = os.getenv('SOURCE_COLLECTION')
@@ -71,8 +72,8 @@ class PiCamera:
         
 
     def delete_photos(self):
-        for folder in os.listdir(SRC_PATH):
-            folder_path = os.path.join(SRC_PATH, folder)
+        for folder in os.listdir(PHOTO_DIR):
+            folder_path = os.path.join(PHOTO_DIR, folder)
             if os.path.isdir(folder_path):
                 shutil.rmtree(folder_path)
         return {"message": "Photos deleted."}
@@ -108,7 +109,7 @@ class PiCamera:
         transfer_request = globus_sdk.TransferData(source_endpoint=SOURCE_COLLECTION, 
                                                     destination_endpoint=DEST_COLLECTION) # Create transfer request
         dest_path = os.path.join(DEST_PATH, foldername, PI_ID) # Append foldername and pi id to destination path
-        transfer_request.add_item(SRC_PATH, dest_path, recursive=True) # Add transfer item with recursive flag for directories
+        transfer_request.add_item(GLOBUS_SRC_PATH, dest_path, recursive=True) # Add transfer item with recursive flag for directories
 
         try:
             task = self.transfer_client.submit_transfer(transfer_request) # Submit transfer request
