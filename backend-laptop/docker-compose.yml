@@ -1,0 +1,8 @@
+
+
+services:
+  backend-server:
+    container_name: laptop-backend
+    build: .
+    ports:
+      - "8000:8000"

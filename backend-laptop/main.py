@@ -2,14 +2,10 @@
 from fastapi import FastAPI
 import requests
 from pydantic import BaseModel
-import os
-from dotenv import load_dotenv
-from datetime import datetime
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
 
 
-load_dotenv()
 app = FastAPI()
 
 # Add CORS middleware. Allows for requests from different ports/origins
