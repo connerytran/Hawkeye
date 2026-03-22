@@ -5,7 +5,7 @@ name: Deploy Pi Docker Image
 on:                   
   push:
     branches:
-      - main          
+      - development          
 
 jobs:                 
   build:              
@@ -31,4 +31,4 @@ jobs:
           file: ./pi-server/Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ secrets.DOCKER_USERNAME }}/pi-server:latest
+          tags: ${{ secrets.DOCKER_USERNAME }}/hawkeye-pi-backend:latest
