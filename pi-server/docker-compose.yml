@@ -1,0 +1,19 @@
+
+services:
+  pi-server:
+    container_name: hawkeye-pi
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - "/home/tomato-imager/TomatoImager/pics:/app/pics"
+      - "/home/tomato-imager/.globus:/root/.globus"
+    devices:
+      - /dev/video0
+      - /dev/video2
+      - /dev/video4
+      - /dev/ttyAMA0
+    env_file:
+      - /home/tomato-imager/TomatoImager/.env
+    environment:
+      - PHOTO_DIR=/app/pics/
