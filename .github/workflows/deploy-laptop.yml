@@ -1,13 +1,11 @@
 
 
-
-
-name: Deploy Pi Docker Image
+name: Deploy Laptop Docker Image
 
 on:                   
   push:
     branches:
-      - main          
+      - development          
 
 jobs:                 
   build:              
@@ -29,5 +27,5 @@ jobs:
           context: ./backend-laptop
           file: ./backend-laptop/Dockerfile
           push: true
-          platforms: linux/arm64
+          platforms: linux/amd64
           tags: ${{ secrets.DOCKER_USERNAME }}/hawkeye-laptop-backend:latest
