@@ -5,7 +5,7 @@ from datetime import datetime
 import piexif
 
 
-PHOTO_DIR = "/home/tomato-imager/TomatoImager/pics/"
+PHOTO_DIR = os.getenv("PHOTO_DIR","/home/tomato-imager/TomatoImager/pics/")
 num_of_cams = 3
 timestamp = datetime.now().strftime("%m-%d-%Y_%H-%M-%S")
 
