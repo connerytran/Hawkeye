@@ -3,6 +3,7 @@
 services:
   backend-server:
     container_name: laptop-backend
+    image: connerytran/hawkeye-laptop-backend:latest
     build: .
     ports:
       - "8000:8000"
