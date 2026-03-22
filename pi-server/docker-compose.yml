@@ -18,3 +18,4 @@ services:
       - /home/tomato-imager/TomatoImager/.env
     environment:
       - PHOTO_DIR=/app/pics/
+      - GLOBUS_SRC_PATH=/home/tomato-imager/TomatoImager/pics/
