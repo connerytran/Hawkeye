@@ -3,7 +3,7 @@
 services:
   pi-server:
     container_name: hawkeye-pi
-    image: connerytran/hawkeye-pi-backend:latest
+    image: connerytran/hawkeye-pi:latest
     build: .
     ports:
       - "5000:5000"

@@ -1,28 +1,49 @@
 # Hawkeye — Next Steps Checklist
 
-## 🔐 Immediate Blockers
+## ✅ Completed
 - [x] Run `globus login` and complete browser authentication
-- [x] Manually test `python3 globus_transfer.py test` and confirm files land at NC State
-
-## 🔧 Refactor Pi Server
-- [x] Install Globus Python SDK — `pip install globus-sdk --break-system-packages`
-- [x] Design `PiCamera` class — write out attributes and method signatures before any logic
-- [x] Migrate capture logic into the class
-- [x] Migrate Globus transfer into the class using the SDK (replace subprocess CLI calls)
+- [x] Manually test Globus transfer and confirm files land at NC State
+- [x] Install Globus Python SDK
+- [x] Design and build `PiCamera` class
+- [x] Migrate capture logic into the class (threading)
+- [x] Migrate Globus transfer into the class using the SDK
 - [x] Update FastAPI endpoints to use the `PiCamera` instance
 - [x] Test each endpoint manually
+- [x] Integrate NMEA/GPS reading into PiCamera
+- [x] Embed GPS coordinates into image EXIF via piexif
+- [x] Wire up laptop backend to Pi endpoints
+- [x] Connect TomatoScan frontend to laptop backend
 
-## 📍 GPS + Image Metadata
-- [x] Integrate NMEA reading into PiCamera so location data is captured during each session
-- [x] Embed GPS coordinates into image metadata via piexif + sidecar JSON
+## 🚀 Sprint 1 — Containerization and CI/CD ✅
+- [x] Install Docker on laptop
+- [x] Install Docker on Pi
+- [x] Write Dockerfile for Pi server
+- [x] Write Dockerfile for laptop backend
+- [x] Test both containers run locally
+- [x] Push images to Docker Hub manually
+- [x] Set up branching strategy (feature → dev → main)
+- [x] Set up GitHub Actions workflow for Pi server
+- [x] Set up GitHub Actions workflow for laptop backend
+- [x] Add Docker Hub credentials to GitHub secrets
+- [x] Install and configure Watchtower on Pi
+- [x] Test full automated update cycle end to end
 
-## 🗑️ Photo Management
-- [x] Add `delete_photos()` method to PiCamera to clear pics before a new capture run
+## 🧪 Sprint 2 — Automated Testing
+- [ ] Write unit tests for `PiCamera` methods using mocking
+- [ ] Write API endpoint tests for Pi server
+- [ ] Write API endpoint tests for laptop backend
+- [ ] Wire tests into GitHub Actions to block failed deployments
 
-## 🖥️ Laptop Backend + Frontend
-- [x] Wire up the laptop backend to the working Pi endpoints
-- [x] Connect the Hawkeye frontend to the laptop backend
-- [ ] Allow for frontend to read from an env file for ip addresses initialization 
+## 🛠️ Sprint 2.5 — System Polish
+- [ ] Add GPS status to Pi card on frontend
+- [ ] Add cancel Globus transfer endpoint and UI
+- [ ] Add per-camera status to Pi server and frontend
+- [ ] Implement mDNS auto-discovery for Pis
+- [ ] Create systemd service for Pi server (post-Docker stabilization)
+- [ ] Dockerize frontend with nginx
 
-## ⚙️ Reliability
-- [ ] Create a systemd service file for the FastAPI Pi server so it starts on boot
+## 🌱 Sprint 3 — YOLO Pipeline
+- [ ] Add video capture mode to `cam_capture.py`
+- [ ] Label field images using Roboflow
+- [ ] Train YOLOv8 model on labeled data
+- [ ] Run inference and count plants
