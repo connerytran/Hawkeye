@@ -31,4 +31,4 @@ jobs:
           file: ./pi-server/Dockerfile
           push: true
           platforms: linux/arm64
-          tags: ${{ secrets.DOCKER_USERNAME }}/hawkeye-pi-backend:latest
+          tags: ${{ secrets.DOCKER_USERNAME }}/hawkeye-pi:latest

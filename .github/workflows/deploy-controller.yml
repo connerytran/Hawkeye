@@ -1,6 +1,6 @@
 
 
-name: Deploy Laptop Docker Image
+name: Deploy Controller Docker Image
 
 on:                   
   push:
@@ -27,8 +27,8 @@ jobs:
       - name: Build and push Laptop backend image
         uses: docker/build-push-action@v3
         with:
-          context: ./backend-laptop
-          file: ./backend-laptop/Dockerfile
+          context: ./controller
+          file: ./controller/Dockerfile
           push: true
           platforms: linux/amd64
-          tags: ${{ secrets.DOCKER_USERNAME }}/hawkeye-laptop-backend:latest
+          tags: ${{ secrets.DOCKER_USERNAME }}/hawkeye-controller:latest
