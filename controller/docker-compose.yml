@@ -1,0 +1,9 @@
+
+
+services:
+  backend-server:
+    container_name: hawkeye-controller
+    image: connerytran/hawkeye-controller:latest
+    build: .
+    ports:
+      - "8000:8000"

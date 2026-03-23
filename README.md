@@ -1,66 +1,172 @@
-# TomatoImager
-The TomatoImager is a project focused on assisting farmers with the farming of tomatoes. How this imager works is by hooking up raspberry pis and cameras to a tractor boom in order to take many pictures of tomato plants as the tractor drives by. With these pictures we plan to then detect weight, size, yield, and disease. This can be marked on a map for the farmers to easily locate and identify different plants.
+# Hawkeye 🦅
 
+**Precision Agriculture Imaging System** — NC State University, N.C. Plant Sciences Initiative
 
-## Installation
+Hawkeye is a multi-device field imaging platform that deploys four Raspberry Pi cameras on a tractor boom to capture large volumes of georeferenced field images. Data is automatically transferred to NC State research storage via Globus, and the pipeline is designed for future AI-powered plant detection and counting using YOLOv8.
 
-** Install on both caller device and capture device **
+---
 
-1. Clone the repo
-   ```sh
-   git clone https://github.com/connerytran/TomatoImager.git
-   ```
-2. Create a python environment
-   ```sh
-   cd TomatoImager
-   python3 -m venv your_venv_name 
-   ```
-3. Install library requirements
-   ```sh
-   source your_venv_name/bin/activate # Activation varies depending on os
-   pip install -r requirements.txt
-   ```
+## Architecture
 
+Hawkeye uses a three-tier architecture:
 
-
-## Configuration
-
-**Ensure both caller device and capture device are on the same network**
-- create your own .env file from the example given
-- on your pis, check to make sure your cameras are being detected. If not, take steps to make sure the cameras are being  recognized
-
-### Caller .env configurations
-- pi_user and pi_password are the information needed to ssh into the pi to call the scripts.
-- script_path is how you can choose to call the async script or non async script.
-- stop_path is where the file that signals for the pi to stop will be.
-- pi_host_* is where you would put the ip addresses of your capture devices
-
-### Capture .env configurations
-- photo_dir is the dir where you want to store the photos
-- use:
-  ```sh
-  v4l2-ctl --list-devices
-  v4l2-ctl -d /dev/videoX --list-formats-ext
-  v4l2-ctl -d /dev/videoX --list-ctrls
-  ```
-  to know what formats your camera is suited for, as well as what camera properties it     can handle. The X in videoX is a placeholder for whatever camera listed.
-- the camera properties can be adjusted to your liking, but ensure they are suitable for your camera
-
-
-
-## Usage
-From the caller device call:
-```sh
-   python tomato_ssh_call.py
 ```
-When you want to stop, you can hit Ctrl-C or in a separate terminal call:
-```sh
-   python stop_sig.py
+React Frontend (TomatoScan)
+        ↓
+FastAPI Controller (laptop)
+        ↓
+FastAPI Pi Servers (x4 Raspberry Pis)
 ```
 
+- **Frontend** — React + Vite dashboard for controlling the Pi fleet, triggering captures, and monitoring transfer status
+- **Controller** — FastAPI orchestration layer that broadcasts commands to selected Pis and aggregates results
+- **Pi Servers** — FastAPI servers running on each Pi, managing cameras, GPS, and Globus transfers via a `PiCamera` class
 
+---
 
+## Features
 
+### Camera Capture
+- Captures images from up to 3 USB cameras simultaneously per Pi
+- Camera capture runs in a dedicated background thread using `threading.Thread` and `threading.Event` for cooperative shutdown
+- Camera failures surface immediately via thread health monitoring
 
+### GPS + EXIF Metadata
+- SparkFun Ultimate GPS Breakout v3 reads NMEA sentences over serial (`/dev/ttyAMA0`)
+- `pynmeagps` parses GPRMC sentences in a daemon thread, continuously updating location
+- GPS coordinates (lat/lon) converted to DMS rationals and embedded directly into JPEG EXIF data via `piexif`
+- Photos are geotagged automatically — no post-processing required
 
-   
+### Globus Transfer
+- Migrated from CLI subprocess calls to the Globus Python SDK (`globus_sdk`)
+- `TransferClient` maintained as a persistent class attribute on `PiCamera`
+- Recursive directory transfers with real-time status polling via Globus task IDs
+- Transfer status endpoint exposes live Globus task data (bytes transferred, files, faults, etc.)
+
+### PiCamera Class
+- Single class owns all Pi state: capture thread, stop flag, GPS location dict, Globus client, and task ID
+- FastAPI endpoints are thin wrappers that delegate to the class
+- Clean separation of concerns — camera logic, GPS, and transfer logic are independent
+
+### React Dashboard 
+- Per-Pi unit cards with status badges, last response, and individual action buttons
+- Bulk actions (Start Capture, Stop Capture, Globus Transfer) across selected Pis
+- Folder name input for organizing Globus transfers
+- Live log view showing all actions and responses
+- Add/remove/rename Pi units dynamically
+
+### Containerization & CI/CD
+- Pi server and controller each have their own `Dockerfile` and `docker-compose.yml`
+- GitHub Actions automatically builds and pushes Docker images to Docker Hub on merge to `main`
+- Watchtower running on each Pi detects new images and automatically pulls and restarts containers
+- Full automated deployment pipeline — push code, devices update themselves
+
+---
+
+## Project Structure
+
+```
+TomatoImager/
+├── pi-server/              # FastAPI server for each Raspberry Pi
+│   ├── PiCamera.py         # Core class managing capture, GPS, and transfers
+│   ├── pi_server.py        # FastAPI endpoints
+│   ├── cam_capture.py      # Camera capture logic
+│   ├── gps_reader.py       # NMEA GPS reader
+│   ├── Dockerfile
+│   └── docker-compose.yml
+├── controller/             # FastAPI orchestration layer (laptop)
+│   ├── main.py             # FastAPI endpoints
+│   ├── Dockerfile
+│   └── docker-compose.yml
+├── frontend/               # React + Vite dashboard
+│   └── src/
+│       ├── App.tsx
+│       └── components/
+└── .github/
+    └── workflows/
+        ├── deploy-pi.yml       # Builds and pushes Pi server image
+        └── deploy-laptop.yml   # Builds and pushes controller image
+```
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React, TypeScript, Vite, Tailwind CSS, shadcn/ui |
+| Controller | Python, FastAPI, uvicorn |
+| Pi Server | Python, FastAPI, OpenCV, piexif, pynmeagps, pyserial |
+| Transfer | Globus SDK |
+| Containerization | Docker, Docker Compose |
+| CI/CD | GitHub Actions, Docker Hub, Watchtower |
+| Hardware | Raspberry Pi 4, SparkFun Ultimate GPS Breakout v3, USB cameras |
+
+---
+
+## Getting Started
+
+### Pi Server
+
+```bash
+cd pi-server
+docker compose up -d
+```
+
+Requires a `.env` file with:
+```
+CLIENT_ID=
+SOURCE_COLLECTION=
+DEST_COLLECTION=
+PI_ID=
+PHOTO_DIR=/app/pics/
+GLOBUS_SRC_PATH=/home/tomato-imager/TomatoImager/pics/
+```
+
+### Controller
+
+```bash
+cd controller
+docker compose up -d
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+---
+
+## Pi Server Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/capture-status` | Returns capture thread status and timestamps |
+| POST | `/start-capture` | Starts image capture in background thread |
+| POST | `/stop-capture` | Sets stop flag to halt capture |
+| POST | `/globus-transfer` | Submits recursive Globus transfer |
+| GET | `/transfer-status` | Returns live Globus task status |
+| DELETE | `/delete-photos` | Deletes all photos from pics directory |
+
+---
+
+## Roadmap
+
+- [ ] Automated testing (pytest + mocking for hardware)
+- [ ] GPS status on frontend
+- [ ] Per-camera health status
+- [ ] mDNS auto-discovery of Pis on network
+- [ ] Dockerize frontend with nginx
+- [ ] YOLOv8-track pipeline for plant detection and counting
+- [ ] Disease detection (stretch goal)
+
+---
+
+## Author
+
+Connery Tran — NC State University  
+N.C. Plant Sciences Initiative  
+chtran3@ncsu.edu
