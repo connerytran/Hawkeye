@@ -19,9 +19,9 @@ function BreadcrumbList({ className, ...props }: React.ComponentProps<"ol">) {
       {...props}
     />
   );
-}
-
-function BreadcrumbItem({ className, ...props }: React.ComponentProps<"li">) {
+  }
+  
+  function BreadcrumbItem({ className, ...props }: React.ComponentProps<"li">) {
   return (
     <li
       data-slot="breadcrumb-item"

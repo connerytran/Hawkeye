@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi import HTTPException
 from PiCamera import PiCamera
 from pydantic import BaseModel
+from utils.validators import _is_valid_foldername
 import uvicorn
 
 
@@ -72,15 +73,6 @@ async def transfer_status():
     return transfer_status
 
 
-
-def _is_valid_foldername(name: str) -> bool:
-    # Basic validation: non-empty, no path separators, reasonable length
-    if not name or len(name) > 255 or '/' in name or '\\' in name \
-        or ':' in name or '*' in name or '?' in name \
-        or '"' in name or '<' in name or '>' in name or '|' in name \
-        or name.endswith(' ') or name.endswith('.'):
-        return False
-    return True
 
 
 if __name__ == '__main__':

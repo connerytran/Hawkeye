@@ -4,3 +4,7 @@ venv
 __pycache__
 .venv
 node_modules/
+.pytest_cache/
+pi-server/.coverage
+coverage.lcov
+pi-server/htmlcov/
