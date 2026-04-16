@@ -1,0 +1,18 @@
+{
+    "python.testing.pytestArgs": [
+        "pi-server"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "coverage-gutters.coverageFileNames": ["coverage.lcov"],
+
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/.pytest_cache": true,
+        "**/htmlcov": true,
+        "**/.coverage": true,
+        "**/coverage.lcov": true,
+        "**/node_modules": true
+    }
+}
+

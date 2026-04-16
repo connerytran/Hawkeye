@@ -5,6 +5,7 @@ services:
     container_name: hawkeye-pi
     image: connerytran/hawkeye-pi:latest
     build: .
+    restart: always
     ports:
       - "5000:5000"
     volumes:

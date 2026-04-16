@@ -41,6 +41,7 @@
 - [ ] Implement mDNS auto-discovery for Pis
 - [ ] Create systemd service for Pi server (post-Docker stabilization)
 - [ ] Dockerize frontend with nginx
+- [ ] Gracefully fail the GPS thread if /dev/ttyAMA0 has none
 
 ## 🌱 Sprint 3 — YOLO Pipeline
 - [ ] Add video capture mode to `cam_capture.py`
