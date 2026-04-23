@@ -1,4 +1,6 @@
 
+import asyncio
+
 from fastapi import FastAPI
 import requests
 from pydantic import BaseModel
@@ -7,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from zeroconf import Zeroconf, ServiceBrowser, ServiceStateChange, IPVersion
 import socket
 import time
+import ipaddress
 
 
 app = FastAPI()
@@ -267,24 +270,43 @@ async def transfer_status(request: PiRequest):
        'results' : results
     }
 
+def _get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('8.8.8.8', 80))
+        return s.getsockname()[0]
+    finally:
+        s.close()
+
 
 @app.get('/discover-pis')
 async def discover_pis():
     discovered_pis = []
 
-    def on_service_state_change(zeroconf, service_type, hostname, state_change):
+
+    def on_service_state_change(zeroconf, service_type, name, state_change, **kwargs):
+        print("Service state change detected: ", name, state_change)
         if state_change == ServiceStateChange.Added:
-            info = zeroconf.get_service_info(service_type, hostname)
+            info = zeroconf.get_service_info(service_type, name)
+            print(info)
             if info:
                 ip_address = socket.inet_ntoa(info.addresses[0])
                 discovered_pis.append(
-                    {'hostname': hostname, 
+                    {'hostname': name, 
                      'ip': ip_address,
                      'port': info.port}
                 )
-    zc = Zeroconf(ip_version=IPVersion.V4Only)         # socket that does the listening for the service discovery
+
+
+    local_ip = _get_local_ip()           
+    print(f"Local IP: {local_ip}")
+ 
+    zc = Zeroconf(ip_version=IPVersion.V4Only, interfaces=[local_ip])         # socket that does the listening for the service discovery
+    print("Discovering Pis on the network...")
     browser = ServiceBrowser(zc, "_hawkeye._tcp.local.", handlers=[on_service_state_change])    # ServiceBrowser listens for services of type "_hawkeye._tcp.local." and calls the handler function when a service is added
-    time.sleep(3)
+    print(f"Discovered: {discovered_pis}")
+
+    await asyncio.sleep(3)
     zc.close()
                 
     return {'pis': discovered_pis}
