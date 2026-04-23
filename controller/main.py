@@ -4,6 +4,9 @@ import requests
 from pydantic import BaseModel
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
+from zeroconf import Zeroconf, ServiceBrowser, ServiceStateChange, IPVersion
+import socket
+import time
 
 
 app = FastAPI()
@@ -265,6 +268,26 @@ async def transfer_status(request: PiRequest):
     }
 
 
+@app.get('/discover-pis')
+async def discover_pis():
+    discovered_pis = []
+
+    def on_service_state_change(zeroconf, service_type, hostname, state_change):
+        if state_change == ServiceStateChange.Added:
+            info = zeroconf.get_service_info(service_type, hostname)
+            if info:
+                ip_address = socket.inet_ntoa(info.addresses[0])
+                discovered_pis.append(
+                    {'hostname': hostname, 
+                     'ip': ip_address,
+                     'port': info.port}
+                )
+    zc = Zeroconf(ip_version=IPVersion.V4Only)         # socket that does the listening for the service discovery
+    browser = ServiceBrowser(zc, "_hawkeye._tcp.local.", handlers=[on_service_state_change])    # ServiceBrowser listens for services of type "_hawkeye._tcp.local." and calls the handler function when a service is added
+    time.sleep(3)
+    zc.close()
+                
+    return {'pis': discovered_pis}
 
 
 if __name__ == "__main__":
