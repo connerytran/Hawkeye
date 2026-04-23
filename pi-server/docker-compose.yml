@@ -16,3 +16,14 @@ services:
     environment:
       - PHOTO_DIR=/app/pics/
       - GLOBUS_SRC_PATH=/home/tomato-imager/TomatoImager/pics/
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_POLL_INTERVAL=30
+      - DOCKER_API_VERSION=1.41
+    command: hawkeye-pi
