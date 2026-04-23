@@ -1,9 +1,15 @@
 
+import asyncio
+
 from fastapi import FastAPI
 import requests
 from pydantic import BaseModel
 import uvicorn
 from fastapi.middleware.cors import CORSMiddleware
+from zeroconf import Zeroconf, ServiceBrowser, ServiceStateChange, IPVersion
+import socket
+import time
+import ipaddress
 
 
 app = FastAPI()
@@ -49,7 +55,7 @@ async def capture_status(request: PiRequest):
         
         try:
             #The requests.get() function sends an HTTP GET request
-            response = requests.get(url, timeout=5) # Set a 5-second timeout
+            response = requests.get(url, timeout=3) # Set a 5-second timeout
 
             # Check for a successful HTTP status code 
             if response.status_code == 200:
@@ -88,7 +94,7 @@ async def start_capture(request: PiRequest):
         
         try:
             #The requests.post() function sends an HTTP POST request
-            response = requests.post(url, timeout=5) # Set a 5-second timeout
+            response = requests.post(url, timeout=3) # Set a 5-second timeout
 
             # Check for a successful HTTP status code 
             if response.status_code == 200:
@@ -126,7 +132,7 @@ async def stop_capture(request: PiRequest):
         
         try:
             #The requests.post() function sends an HTTP POST request
-            response = requests.post(url, timeout=5) 
+            response = requests.post(url, timeout=3) 
 
             # Check for a successful HTTP status code 
             if response.status_code == 200:
@@ -165,7 +171,7 @@ async def delete_photos(request: PiRequest):
         
         try:
             #The requests.get() function sends an HTTP GET request
-            response = requests.delete(url, timeout=5) # Set a 5-second timeout
+            response = requests.delete(url, timeout=3) # Set a 5-second timeout
 
             # Check for a successful HTTP status code 
             if response.status_code == 200:
@@ -203,7 +209,7 @@ async def globus_transfer(request: GlobusRequest):
         
         try:
             #The requests.post() function sends an HTTP POST request
-            response = requests.post(url, json={'foldername': foldername}, timeout=5) 
+            response = requests.post(url, json={'foldername': foldername}, timeout=3) 
 
             # Check for a successful HTTP status code 
             if response.status_code == 200:
@@ -243,7 +249,7 @@ async def transfer_status(request: PiRequest):
         
         try:
             #The requests.get() function sends an HTTP GET request
-            response = requests.get(url, timeout=5) # Set a 5-second timeout
+            response = requests.get(url, timeout=3) # Set a 5-second timeout
 
             # Check for a successful HTTP status code 
             if response.status_code == 200:
@@ -264,7 +270,41 @@ async def transfer_status(request: PiRequest):
        'results' : results
     }
 
+def _get_local_ip():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('8.8.8.8', 80))
+        return s.getsockname()[0]
+    finally:
+        s.close()
 
+
+@app.get('/discover-pis')
+async def discover_pis():
+    discovered_pis = []
+
+
+    def on_service_state_change(zeroconf, service_type, name, state_change, **kwargs):
+        if state_change == ServiceStateChange.Added:
+            info = zeroconf.get_service_info(service_type, name)
+            if info:
+                ip_address = socket.inet_ntoa(info.addresses[0])
+                discovered_pis.append(
+                    {'hostname': name, 
+                     'ip': ip_address,
+                     'port': info.port}
+                )
+
+
+    local_ip = _get_local_ip()            
+    zc = Zeroconf(ip_version=IPVersion.V4Only, interfaces=[local_ip])         # socket that does the listening for the service discovery
+    browser = ServiceBrowser(zc, "_hawkeye._tcp.local.", handlers=[on_service_state_change])    # ServiceBrowser listens for services of type "_hawkeye._tcp.local." and calls the handler function when a service is added
+    print(f"Discovered: {discovered_pis}")
+
+    await asyncio.sleep(3)
+    zc.close()
+                
+    return {'pis': discovered_pis}
 
 
 if __name__ == "__main__":

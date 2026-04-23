@@ -6,8 +6,8 @@ import { useState, useRef, useEffect } from "react";
 export type PiStatus = "online" | "offline" | "busy" | "error" | "connecting";
 
 export interface TransferInfo {
-  status: string;       // machine-readable: ACTIVE, SUCCEEDED, FAILED, INACTIVE
-  nice_status: string;  // human-readable: "Ok", "Queued", etc.
+  status: string;
+  nice_status: string;
   files: number;
   files_transferred: number;
   bytes_transferred: number;
@@ -20,7 +20,7 @@ export interface PiUnit {
   status: PiStatus;
   lastResponse: string;
   lastResponseTime: string;
-  ipAddress: string;
+  hostname: string;
   transfer?: TransferInfo | null;
   autoClear?: boolean;
 }
@@ -36,7 +36,7 @@ interface PiUnitCardProps {
   onToggleAutoClear: () => void;
   onRemove: () => void;
   onRename: (newId: string) => void;
-  onUpdateIp: (newIp: string) => void;
+  onUpdateHostname: (newHostname: string) => void;
   isDragging?: boolean;
   isDragOver?: boolean;
   onDragStart: () => void;
@@ -86,7 +86,7 @@ export function PiUnitCard({
   onToggleAutoClear,
   onRemove,
   onRename,
-  onUpdateIp,
+  onUpdateHostname,
   isDragging = false,
   isDragOver = false,
   onDragStart,
@@ -95,73 +95,51 @@ export function PiUnitCard({
 }: PiUnitCardProps) {
   const statusStyle = statusConfig[unit.status];
   const isOffline = unit.status === "offline";
-  // connecting Pis are not yet reachable — treat them like offline for action purposes
   const isUnavailable = isOffline || unit.status === "connecting";
 
   const handleCardClick = () => {
-    if (!isUnavailable) {
-      onSelectChange(!selected);
-    }
-  };
-
-  const handleButtonClick = (e: React.MouseEvent, action: () => void) => {
-    e.stopPropagation();
-    if (!isUnavailable) {
-      action();
-    }
+    if (!isUnavailable) onSelectChange(!selected);
   };
 
   const handleRemoveClick = (e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent card selection when clicking remove
+    e.stopPropagation();
     onRemove();
   };
 
   const handleCheckboxClick = (e: React.MouseEvent) => {
-    e.stopPropagation(); // Prevent double-toggle
+    e.stopPropagation();
   };
 
   const [isEditMode, setIsEditMode] = useState(false);
   const [editName, setEditName] = useState(unit.id);
-  const [editIp, setEditIp] = useState(unit.ipAddress);
-  const [ipError, setIpError] = useState(false);
-
-  const IP_REGEX = /^(\d{1,3}\.){3}\d{1,3}$/;
+  const [editHostname, setEditHostname] = useState(unit.hostname);
 
   const handleInputClick = (e: React.MouseEvent) => e.stopPropagation();
 
   const openEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
     setEditName(unit.id);
-    setEditIp(unit.ipAddress);
-    setIpError(false);
+    setEditHostname(unit.hostname);
     setIsEditMode(true);
   };
 
   const saveEdit = (e: React.SyntheticEvent) => {
     e.stopPropagation();
-    const newIp = editIp.trim();
-    if (newIp && newIp !== unit.ipAddress && !IP_REGEX.test(newIp)) {
-      setIpError(true);
-      return; // keep edit mode open so user can fix it
-    }
-    setIpError(false);
     if (editName.trim() && editName.trim() !== unit.id) onRename(editName.trim());
-    if (newIp && newIp !== unit.ipAddress) onUpdateIp(newIp);
+    if (editHostname.trim() && editHostname.trim() !== unit.hostname) onUpdateHostname(editHostname.trim());
     setIsEditMode(false);
   };
 
   const cancelEdit = (e: React.SyntheticEvent) => {
     e.stopPropagation();
-    setIpError(false);
     setIsEditMode(false);
   };
 
   const handleEditKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') saveEdit(e);
-    else if (e.key === 'Escape') cancelEdit(e);
+    if (e.key === "Enter") saveEdit(e);
+    else if (e.key === "Escape") cancelEdit(e);
   };
 
-  // Dropdown state
   const [captureOpen, setCaptureOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const captureDropRef = useRef<HTMLDivElement>(null);
@@ -180,16 +158,20 @@ export function PiUnitCard({
     <div
       draggable={!isEditMode}
       onClick={handleCardClick}
-      onDragStart={(e) => { if (isEditMode) { e.preventDefault(); return; } e.dataTransfer.effectAllowed = "move"; onDragStart(); }}
+      onDragStart={(e) => {
+        if (isEditMode) { e.preventDefault(); return; }
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart();
+      }}
       onDragOver={(e) => { e.preventDefault(); onDragOver(); }}
       onDragEnd={onDragEnd}
       className={`
         relative rounded-xl bg-white border-2 shadow-sm
         transition-all duration-200 ease-out select-none
-        ${(captureOpen || transferOpen) ? 'z-20' : 'z-0'}
-        ${isDragging ? 'opacity-40 scale-95' : ''}
-        ${isDragOver ? 'border-red-400 shadow-[0_0_0_3px_rgba(204,0,0,0.15)] -translate-y-1' : ''}
-        ${!isDragging && !isDragOver ? (isOffline ? 'cursor-grab' : 'cursor-grab hover:shadow-lg hover:-translate-y-0.5') : ''}
+        ${captureOpen || transferOpen ? "z-20" : "z-0"}
+        ${isDragging ? "opacity-40 scale-95" : ""}
+        ${isDragOver ? "border-red-400 shadow-[0_0_0_3px_rgba(204,0,0,0.15)] -translate-y-1" : ""}
+        ${!isDragging && !isDragOver ? (isOffline ? "cursor-grab" : "cursor-grab hover:shadow-lg hover:-translate-y-0.5") : ""}
         ${selected && !isDragOver ? "border-red-600 shadow-[0_0_0_3px_rgba(204,0,0,0.1)]" : !isDragOver ? "border-gray-200 hover:border-gray-300" : ""}
       `}
     >
@@ -242,40 +224,29 @@ export function PiUnitCard({
 
         {/* Status Badge */}
         <div className="mb-4">
-          <span
-            className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${statusStyle.className}`}
-          >
+          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${statusStyle.className}`}>
             {statusStyle.label}
           </span>
         </div>
 
-        {/* IP Address */}
+        {/* Hostname */}
         <div className="mb-3">
-          <p className="text-xs text-gray-500 mb-1">IP Address</p>
+          <p className="text-xs text-gray-500 mb-1">Hostname</p>
           {isEditMode ? (
-            <div>
-              <input
-                type="text"
-                value={editIp}
-                onChange={(e) => { setEditIp(e.target.value); setIpError(false); }}
-                onClick={handleInputClick}
-                onKeyDown={handleEditKeyDown}
-                className={`font-mono text-sm w-full border rounded px-2 py-0.5 focus:outline-none focus:ring-1 ${
-                  ipError
-                    ? "border-red-500 focus:ring-red-300 bg-red-50"
-                    : "border-red-600 focus:ring-red-600"
-                }`}
-              />
-              {ipError && (
-                <p className="text-[10px] text-red-500 mt-0.5">Invalid IP address format</p>
-              )}
-            </div>
+            <input
+              type="text"
+              value={editHostname}
+              onChange={(e) => setEditHostname(e.target.value)}
+              onClick={handleInputClick}
+              onKeyDown={handleEditKeyDown}
+              className="font-mono text-sm w-full border border-red-600 rounded px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-red-600"
+            />
           ) : (
-            <p className="text-sm font-mono text-gray-900">{unit.ipAddress}</p>
+            <p className="text-sm font-mono text-gray-900">{unit.hostname}</p>
           )}
         </div>
 
-        {/* Capture Status Indicator */}
+        {/* Capture Status */}
         <div className="mb-3 flex items-center justify-between">
           <span className="text-xs text-gray-500">Capture</span>
           <div className="flex items-center gap-1.5">
@@ -303,12 +274,12 @@ export function PiUnitCard({
           </div>
         </div>
 
-        {/* Upload / Transfer Status Bar */}
+        {/* Transfer Status Bar */}
         {(() => {
           const t = unit.transfer;
-          const isActive   = t?.status === "ACTIVE";
+          const isActive = t?.status === "ACTIVE";
           const isSucceeded = t?.status === "SUCCEEDED";
-          const isFailed   = t?.status === "FAILED";
+          const isFailed = t?.status === "FAILED";
           const isInactive = t?.status === "INACTIVE";
           const hasProgress = !!(t && t.subtasks_total > 0);
           const pct = hasProgress
@@ -317,10 +288,10 @@ export function PiUnitCard({
 
           const statusLabel = isActive && hasProgress
             ? `${pct}%`
-            : isSucceeded  ? "Complete"
-            : isFailed     ? "Failed"
-            : isInactive   ? "Cancelled"
-            : t            ? (t.nice_status || t.status)
+            : isSucceeded ? "Complete"
+            : isFailed ? "Failed"
+            : isInactive ? "Cancelled"
+            : t ? (t.nice_status || t.status)
             : "—";
 
           return (
@@ -337,10 +308,7 @@ export function PiUnitCard({
                 ) : isSucceeded ? (
                   <div className="h-full w-full rounded-full bg-emerald-500" />
                 ) : isActive && hasProgress ? (
-                  <div
-                    className="h-full rounded-full bg-blue-500 transition-all duration-700"
-                    style={{ width: `${pct}%` }}
-                  />
+                  <div className="h-full rounded-full bg-blue-500 transition-all duration-700" style={{ width: `${pct}%` }} />
                 ) : isActive ? (
                   <div className="h-full w-full bg-blue-500 rounded-full animate-[captureSlide_1.5s_ease-in-out_infinite]" />
                 ) : null}
@@ -360,8 +328,7 @@ export function PiUnitCard({
 
         {/* Action Dropdowns */}
         <div className="flex gap-2 items-center">
-
-          {/* ── Capture Controls ── */}
+          {/* Capture Controls */}
           <div className="relative flex-1" ref={captureDropRef}>
             <button
               onClick={(e) => { e.stopPropagation(); if (!isUnavailable) { setCaptureOpen((o) => !o); setTransferOpen(false); } }}
@@ -374,7 +341,6 @@ export function PiUnitCard({
               </div>
               <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${captureOpen ? "rotate-180" : ""}`} />
             </button>
-
             {captureOpen && (
               <div className="absolute top-full mt-1 left-0 right-0 z-50 bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden">
                 <button
@@ -395,7 +361,7 @@ export function PiUnitCard({
             )}
           </div>
 
-          {/* ── Transfer Controls ── */}
+          {/* Transfer Controls */}
           <div className="relative flex-1" ref={transferDropRef}>
             <button
               onClick={(e) => { e.stopPropagation(); if (!isUnavailable) { setTransferOpen((o) => !o); setCaptureOpen(false); } }}
@@ -408,7 +374,6 @@ export function PiUnitCard({
               </div>
               <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${transferOpen ? "rotate-180" : ""}`} />
             </button>
-
             {transferOpen && (
               <div className="absolute top-full mt-1 left-0 right-0 z-50 bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden">
                 <button
@@ -431,7 +396,6 @@ export function PiUnitCard({
                   className="flex items-center gap-2 px-3 py-2 border-t border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors"
                   onClick={(e) => { e.stopPropagation(); onToggleAutoClear(); }}
                 >
-                  {/* pointer-events-none so all clicks route to the parent div — prevents double-toggle */}
                   <input
                     type="checkbox"
                     checked={unit.autoClear ?? false}
@@ -446,7 +410,7 @@ export function PiUnitCard({
             )}
           </div>
 
-          {/* Remove icon button */}
+          {/* Remove button */}
           <button
             onClick={handleRemoveClick}
             title="Remove Pi"
@@ -454,7 +418,6 @@ export function PiUnitCard({
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
-
         </div>
       </div>
     </div>

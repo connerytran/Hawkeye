@@ -11,7 +11,7 @@ import shutil
 
 load_dotenv(dotenv_path="/home/tomato-imager/TomatoImager/.env")
 
-PHOTO_DIR = os.getenv('PHOTO_DIR')
+PHOTO_DIR = os.getenv('PHOTO_DIR', '/home/tomato-imager/TomatoImager/pics/')
 GLOBUS_SRC_PATH = os.getenv("GLOBUS_SRC_PATH","/home/tomato-imager/TomatoImager/pics/")
 DEST_PATH ="/rs1/shares/cals-research-station/clinton/hawkeye/"
 CLIENT_ID = os.getenv('CLIENT_ID')

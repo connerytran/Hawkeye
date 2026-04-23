@@ -4,9 +4,41 @@ from PiCamera import PiCamera
 from pydantic import BaseModel
 from utils.validators import _is_valid_foldername
 import uvicorn
+from zeroconf.asyncio import AsyncZeroconf, AsyncServiceInfo, IPVersion
+from contextlib import asynccontextmanager
+import socket
+import os
 
 
-app = FastAPI()
+## Using Zeroconf to broadcase the tcp service to be picked up via mDNS
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- STARTUP ---
+    zc = AsyncZeroconf(ip_version=IPVersion.V4Only)
+    hostname = socket.gethostname()
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.connect(('8.8.8.8', 80))
+    local_ip = s.getsockname()[0]
+    s.close()
+    
+    info = AsyncServiceInfo(
+        "_hawkeye._tcp.local.",
+        f"{hostname}._hawkeye._tcp.local.",
+        addresses=[socket.inet_aton(local_ip)],
+        port=5000,
+        properties={"pi_id": os.getenv("PI_ID", hostname)},
+        server=f"{hostname}.local.",
+    )
+    await zc.async_register_service(info)
+    
+    yield  # server runs here
+    
+    # --- SHUTDOWN ---
+    await zc.async_unregister_service(info)
+    await zc.async_close()
+
+
+app = FastAPI(lifespan=lifespan)
 Pi_Camera = PiCamera()
 
 

@@ -4,20 +4,26 @@ services:
   pi-server:
     container_name: hawkeye-pi
     image: connerytran/hawkeye-pi:latest
-    build: .
     restart: always
     ports:
       - "5000:5000"
     volumes:
       - "/home/tomato-imager/TomatoImager/pics:/app/pics"
       - "/home/tomato-imager/.globus:/root/.globus"
-    devices:
-      - /dev/video0
-      - /dev/video2
-      - /dev/video4
-      - /dev/ttyAMA0
+    privileged: True
     env_file:
       - /home/tomato-imager/TomatoImager/.env
     environment:
       - PHOTO_DIR=/app/pics/
       - GLOBUS_SRC_PATH=/home/tomato-imager/TomatoImager/pics/
+
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_POLL_INTERVAL=30
+      - DOCKER_API_VERSION=1.41
+    command: hawkeye-pi
