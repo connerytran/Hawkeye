@@ -129,7 +129,7 @@ export default function App() {
       const n = parseInt(u.id.split("-")[1]);
       return isNaN(n) ? max : n > max ? n : max;
     }, 0);
-    const newId = `Pi-${String(maxId + 1).padStart(2, "0")}`;
+    const newId = cleanName;
 
     setPiUnits((prev) => [
       ...prev,
