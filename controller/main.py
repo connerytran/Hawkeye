@@ -55,7 +55,7 @@ async def capture_status(request: PiRequest):
         
         try:
             #The requests.get() function sends an HTTP GET request
-            response = requests.get(url, timeout=5) # Set a 5-second timeout
+            response = requests.get(url, timeout=3) # Set a 5-second timeout
 
             # Check for a successful HTTP status code 
             if response.status_code == 200:
@@ -94,7 +94,7 @@ async def start_capture(request: PiRequest):
         
         try:
             #The requests.post() function sends an HTTP POST request
-            response = requests.post(url, timeout=5) # Set a 5-second timeout
+            response = requests.post(url, timeout=3) # Set a 5-second timeout
 
             # Check for a successful HTTP status code 
             if response.status_code == 200:
@@ -132,7 +132,7 @@ async def stop_capture(request: PiRequest):
         
         try:
             #The requests.post() function sends an HTTP POST request
-            response = requests.post(url, timeout=5) 
+            response = requests.post(url, timeout=3) 
 
             # Check for a successful HTTP status code 
             if response.status_code == 200:
@@ -171,7 +171,7 @@ async def delete_photos(request: PiRequest):
         
         try:
             #The requests.get() function sends an HTTP GET request
-            response = requests.delete(url, timeout=5) # Set a 5-second timeout
+            response = requests.delete(url, timeout=3) # Set a 5-second timeout
 
             # Check for a successful HTTP status code 
             if response.status_code == 200:
@@ -209,7 +209,7 @@ async def globus_transfer(request: GlobusRequest):
         
         try:
             #The requests.post() function sends an HTTP POST request
-            response = requests.post(url, json={'foldername': foldername}, timeout=5) 
+            response = requests.post(url, json={'foldername': foldername}, timeout=3) 
 
             # Check for a successful HTTP status code 
             if response.status_code == 200:
@@ -249,7 +249,7 @@ async def transfer_status(request: PiRequest):
         
         try:
             #The requests.get() function sends an HTTP GET request
-            response = requests.get(url, timeout=5) # Set a 5-second timeout
+            response = requests.get(url, timeout=3) # Set a 5-second timeout
 
             # Check for a successful HTTP status code 
             if response.status_code == 200:
@@ -285,10 +285,8 @@ async def discover_pis():
 
 
     def on_service_state_change(zeroconf, service_type, name, state_change, **kwargs):
-        print("Service state change detected: ", name, state_change)
         if state_change == ServiceStateChange.Added:
             info = zeroconf.get_service_info(service_type, name)
-            print(info)
             if info:
                 ip_address = socket.inet_ntoa(info.addresses[0])
                 discovered_pis.append(
@@ -298,11 +296,8 @@ async def discover_pis():
                 )
 
 
-    local_ip = _get_local_ip()           
-    print(f"Local IP: {local_ip}")
- 
+    local_ip = _get_local_ip()            
     zc = Zeroconf(ip_version=IPVersion.V4Only, interfaces=[local_ip])         # socket that does the listening for the service discovery
-    print("Discovering Pis on the network...")
     browser = ServiceBrowser(zc, "_hawkeye._tcp.local.", handlers=[on_service_state_change])    # ServiceBrowser listens for services of type "_hawkeye._tcp.local." and calls the handler function when a service is added
     print(f"Discovered: {discovered_pis}")
 

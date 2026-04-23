@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Play, Square, ArrowUpDown, RefreshCw, Plus, Camera, ChevronDown, Eraser } from "lucide-react";
+import { Play, Square, ArrowUpDown, RefreshCw, Camera, ChevronDown, Eraser, Radar } from "lucide-react";
 import { PiUnitCard, PiUnit, PiStatus, TransferInfo } from "./components/PiUnitCard";
 import { LogView, LogEntry } from "./components/LogView";
 import { Checkbox } from "./components/ui/checkbox";
@@ -8,21 +8,12 @@ import ncsuLogo from "../assets/ncsu_logo.png";
 
 const BACKEND_URL = "http://localhost:8000";
 
-const initialPiUnits: PiUnit[] = [
-  {
-    id: "Pi-01",
-    status: "connecting" as PiStatus,
-    lastResponse: "—",
-    lastResponseTime: "—",
-    ipAddress: "192.168.2.97",
-    autoClear: false,
-  },
-];
+const initialPiUnits: PiUnit[] = [];
 
 function extractError(err: unknown): string {
   if (!err) return "Unknown error";
   if (typeof err === "string") {
-    if (err.includes("Connection refused"))          return "Connection refused";
+    if (err.includes("Connection refused")) return "Connection refused";
     if (err.includes("timed out") || err.includes("Timeout") || err.includes("timeout")) return "Connection timed out";
     if (err.includes("Failed to establish") || err.includes("NewConnectionError")) return "Host unreachable";
     if (err.includes("Name or service not known") || err.includes("getaddrinfo")) return "Host not found";
@@ -30,9 +21,9 @@ function extractError(err: unknown): string {
   }
   if (typeof err === "object" && err !== null) {
     const o = err as Record<string, unknown>;
-    if (o.detail)  return String(o.detail);
+    if (o.detail) return String(o.detail);
     if (o.message) return String(o.message);
-    if (o.error)   return extractError(o.error);
+    if (o.error) return extractError(o.error);
     const s = JSON.stringify(err);
     return s.length > 100 ? s.slice(0, 100) + "…" : s;
   }
@@ -44,6 +35,12 @@ function getTimestamp() {
   return `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
 }
 
+interface DiscoveredPi {
+  hostname: string;
+  ip: string;
+  port: number;
+}
+
 export default function App() {
   const [piUnits, setPiUnits] = useState<PiUnit[]>(initialPiUnits);
   const piUnitsRef = useRef(piUnits);
@@ -53,7 +50,6 @@ export default function App() {
 
   const [selectedUnits, setSelectedUnits] = useState<Set<string>>(new Set());
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [newIpAddress, setNewIpAddress] = useState("");
   const [transferModal, setTransferModal] = useState<{ target: "bulk" | string } | null>(null);
   const [modalFolder, setModalFolder] = useState("");
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -63,6 +59,11 @@ export default function App() {
   const [bulkTransferOpen, setBulkTransferOpen] = useState(false);
   const bulkCaptureRef = useRef<HTMLDivElement>(null);
   const bulkTransferRef = useRef<HTMLDivElement>(null);
+
+  // Discovery modal state
+  const [isDiscovering, setIsDiscovering] = useState(false);
+  const [discoveryModal, setDiscoveryModal] = useState(false);
+  const [discoveredPis, setDiscoveredPis] = useState<DiscoveredPi[]>([]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -83,49 +84,98 @@ export default function App() {
     });
   }
 
-  function clearLogs() {
-    setLogs([]);
-  }
+  function clearLogs() { setLogs([]); }
 
-  function getSelectedIps(): string[] {
+  function getSelectedHostnames(): string[] {
     return piUnits
       .filter((u) => selectedUnits.has(u.id))
-      .map((u) => u.ipAddress);
+      .map((u) => u.hostname);
   }
 
+  // ===== DISCOVER PIs =====
+  const handleDiscover = async () => {
+    setIsDiscovering(true);
+    setDiscoveredPis([]);
+    setDiscoveryModal(true);
+    addLog("System", "Discover", "Scanning network for Hawkeye Pis…", "info");
+    try {
+      const res = await fetch(`${BACKEND_URL}/discover-pis`);
+      const data = await res.json();
+      const found: DiscoveredPi[] = data.pis ?? [];
+      setDiscoveredPis(found);
+      if (found.length === 0) {
+        addLog("System", "Discover", "No Pis found on network", "info");
+      } else {
+        addLog("System", "Discover", `Found ${found.length} Pi(s) on network`, "success");
+      }
+    } catch (e) {
+      addLog("System", "Discover", `Discovery failed: ${extractError(e)}`, "error");
+    } finally {
+      setIsDiscovering(false);
+    }
+  };
+
+  const handleAddDiscoveredPi = (discovered: DiscoveredPi) => {
+    // Strip the service suffix from the name e.g. "Hawkeye-2._hawkeye._tcp.local." → "Hawkeye-2"
+    const cleanName = discovered.hostname.split(".")[0];
+    const hostname = `${cleanName}.local`;
+
+    if (piUnits.some((u) => u.hostname === hostname)) {
+      addLog("System", "Add Pi", `${hostname} is already in your fleet`, "error");
+      return;
+    }
+
+    const maxId = piUnits.reduce((max, u) => {
+      const n = parseInt(u.id.split("-")[1]);
+      return isNaN(n) ? max : n > max ? n : max;
+    }, 0);
+    const newId = `Pi-${String(maxId + 1).padStart(2, "0")}`;
+
+    setPiUnits((prev) => [
+      ...prev,
+      {
+        id: newId,
+        status: "connecting" as PiStatus,
+        lastResponse: "—",
+        lastResponseTime: "—",
+        hostname,
+        autoClear: false,
+      },
+    ]);
+    addLog(newId, "Add Pi", `Added ${hostname} to fleet`, "success");
+  };
+
   // ===== REFRESH / STATUS =====
-  const pollStatuses = useCallback(async (silent = false, overrideIps?: string[]) => {
-    // Skip overlapping background polls — if a poll is already running, bail out silently
+  const pollStatuses = useCallback(async (silent = false, overrideHostnames?: string[]) => {
     if (silent && isPollRunning.current) return;
     isPollRunning.current = true;
 
     const currentUnits = piUnitsRef.current;
-    const ips = overrideIps ?? currentUnits.map((u) => u.ipAddress);
-    if (ips.length === 0) { isPollRunning.current = false; return; }
+    const hostnames = overrideHostnames ?? currentUnits.map((u) => u.hostname);
+    if (hostnames.length === 0) { isPollRunning.current = false; return; }
 
     try {
       const [captureRes, transferRes] = await Promise.all([
         fetch(`${BACKEND_URL}/capture-status`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pis: ips }),
+          body: JSON.stringify({ pis: hostnames }),
         }),
         fetch(`${BACKEND_URL}/transfer-status`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pis: ips }),
+          body: JSON.stringify({ pis: hostnames }),
         }),
       ]);
       const captureData = await captureRes.json();
       const transferData = await transferRes.json();
 
-      // Use the latest ref snapshot for transition logging and auto-clear detection
       const snapshot = piUnitsRef.current;
-      const autoClearIps: string[] = [];
+      const autoClearHostnames: string[] = [];
 
       snapshot.forEach((unit) => {
-        const captureResult = captureData.results?.[unit.ipAddress];
-        const transferResult = transferData.results?.[unit.ipAddress];
+        const captureResult = captureData.results?.[unit.hostname];
+        const transferResult = transferData.results?.[unit.hostname];
 
         if (!captureResult || captureResult.error) {
           if (unit.status !== "offline") {
@@ -135,24 +185,20 @@ export default function App() {
           if (unit.status === "offline" || unit.status === "connecting") {
             addLog(unit.id, "Connection", "Back online", "success");
           }
-          // Auto-clear: only fire when the unit has autoClear enabled and transfer just completed
           if (
             unit.autoClear &&
             unit.transfer?.status === "ACTIVE" &&
             transferResult?.status === "SUCCEEDED"
           ) {
-            autoClearIps.push(unit.ipAddress);
+            autoClearHostnames.push(unit.hostname);
           }
         }
       });
 
-      // Use functional updater so we always apply against the *latest* state.
-      // This means drag reorders or renames that happened while the fetch was
-      // in-flight are preserved — we only overwrite status/transfer fields.
       setPiUnits((latest) =>
         latest.map((unit) => {
-          const captureResult = captureData.results?.[unit.ipAddress];
-          const transferResult = transferData.results?.[unit.ipAddress];
+          const captureResult = captureData.results?.[unit.hostname];
+          const transferResult = transferData.results?.[unit.hostname];
 
           if (!captureResult || captureResult.error) {
             return { ...unit, status: "offline" as PiStatus, transfer: null };
@@ -180,17 +226,16 @@ export default function App() {
         })
       );
 
-      // Fire auto-clear for units that just completed transfer with autoClear enabled
-      if (autoClearIps.length > 0) {
+      if (autoClearHostnames.length > 0) {
         try {
           await fetch(`${BACKEND_URL}/delete-photos`, {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ pis: autoClearIps }),
+            body: JSON.stringify({ pis: autoClearHostnames }),
           });
-          autoClearIps.forEach((ip) => {
-            const unit = piUnitsRef.current.find((u) => u.ipAddress === ip);
-            addLog(unit?.id ?? ip, "Auto Clear", "Photos deleted after successful transfer", "success");
+          autoClearHostnames.forEach((hostname) => {
+            const unit = piUnitsRef.current.find((u) => u.hostname === hostname);
+            addLog(unit?.id ?? hostname, "Auto Clear", "Photos deleted after successful transfer", "success");
           });
         } catch (e) {
           addLog("System", "Auto Clear", `Failed to delete photos: ${extractError(e)}`, "error");
@@ -212,32 +257,30 @@ export default function App() {
     setIsRefreshing(false);
   };
 
-  // Auto-refresh every 2 seconds in the background
   useEffect(() => {
-    const interval = setInterval(() => pollStatuses(true), 2000);
+    const interval = setInterval(() => pollStatuses(true), 1000);
     return () => clearInterval(interval);
   }, [pollStatuses]);
 
   // ===== BULK ACTIONS =====
   const handleBulkAction = async (action: string) => {
-    const ips = getSelectedIps();
-    if (ips.length === 0) return;
+    const hostnames = getSelectedHostnames();
+    if (hostnames.length === 0) return;
 
     if (action === "Start Capture") {
-      addLog("System", "Start Capture", `Starting capture on ${ips.length} Pi(s)…`, "info");
+      addLog("System", "Start Capture", `Starting capture on ${hostnames.length} Pi(s)…`, "info");
       try {
         const res = await fetch(`${BACKEND_URL}/start-capture`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pis: ips }),
+          body: JSON.stringify({ pis: hostnames }),
         });
         const data = await res.json();
-        ips.forEach((ip) => {
-          const unit = piUnitsRef.current.find((u) => u.ipAddress === ip);
-          const label = unit?.id ?? ip;
-          const r = data.results?.[ip];
-          if (r?.error) addLog(label, "Start Capture", extractError(r.error), "error");
-          else addLog(label, "Start Capture", "Capture started", "success");
+        hostnames.forEach((hostname) => {
+          const unit = piUnitsRef.current.find((u) => u.hostname === hostname);
+          const r = data.results?.[hostname];
+          if (r?.error) addLog(unit?.id ?? hostname, "Start Capture", extractError(r.error), "error");
+          else addLog(unit?.id ?? hostname, "Start Capture", "Capture started", "success");
         });
       } catch (e) {
         addLog("System", "Start Capture", extractError(e), "error");
@@ -245,43 +288,40 @@ export default function App() {
     }
 
     if (action === "Stop Capture") {
-      addLog("System", "Stop Capture", `Stopping capture on ${ips.length} Pi(s)…`, "info");
+      addLog("System", "Stop Capture", `Stopping capture on ${hostnames.length} Pi(s)…`, "info");
       try {
         const res = await fetch(`${BACKEND_URL}/stop-capture`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pis: ips }),
+          body: JSON.stringify({ pis: hostnames }),
         });
         const data = await res.json();
-        ips.forEach((ip) => {
-          const unit = piUnitsRef.current.find((u) => u.ipAddress === ip);
-          const label = unit?.id ?? ip;
-          const r = data.results?.[ip];
-          if (r?.error) addLog(label, "Stop Capture", extractError(r.error), "error");
-          else addLog(label, "Stop Capture", "Capture stopped", "success");
+        hostnames.forEach((hostname) => {
+          const unit = piUnitsRef.current.find((u) => u.hostname === hostname);
+          const r = data.results?.[hostname];
+          if (r?.error) addLog(unit?.id ?? hostname, "Stop Capture", extractError(r.error), "error");
+          else addLog(unit?.id ?? hostname, "Stop Capture", "Capture stopped", "success");
         });
       } catch (e) {
         addLog("System", "Stop Capture", extractError(e), "error");
       }
     }
-
   };
 
   // ===== INDIVIDUAL UNIT ACTIONS =====
   const handleUnitAction = async (unitId: string, action: string) => {
     const unit = piUnits.find((u) => u.id === unitId);
     if (!unit) return;
-    const ips = [unit.ipAddress];
 
     if (action === "Start Capture") {
       try {
         const res = await fetch(`${BACKEND_URL}/start-capture`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pis: ips }),
+          body: JSON.stringify({ pis: [unit.hostname] }),
         });
         const data = await res.json();
-        const r = data.results?.[unit.ipAddress];
+        const r = data.results?.[unit.hostname];
         if (r?.error) addLog(unitId, "Start Capture", extractError(r.error), "error");
         else addLog(unitId, "Start Capture", "Capture started", "success");
       } catch (e) {
@@ -294,29 +334,22 @@ export default function App() {
         const res = await fetch(`${BACKEND_URL}/stop-capture`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ pis: ips }),
+          body: JSON.stringify({ pis: [unit.hostname] }),
         });
         const data = await res.json();
-        const r = data.results?.[unit.ipAddress];
+        const r = data.results?.[unit.hostname];
         if (r?.error) addLog(unitId, "Stop Capture", extractError(r.error), "error");
         else addLog(unitId, "Stop Capture", "Capture stopped", "success");
       } catch (e) {
         addLog(unitId, "Stop Capture", extractError(e), "error");
       }
     }
-
   };
 
-  // ===== TOGGLE AUTO-CLEAR =====
   const handleToggleAutoClear = (unitId: string) => {
-    setPiUnits((prev) =>
-      prev.map((u) => (u.id === unitId ? { ...u, autoClear: !u.autoClear } : u))
-    );
+    setPiUnits((prev) => prev.map((u) => (u.id === unitId ? { ...u, autoClear: !u.autoClear } : u)));
   };
 
-  // ===== BULK TOGGLE AUTO-CLEAR =====
-  // Compute allOn inside the functional updater so it always reads the latest state,
-  // not the ref (which lags one render behind via useEffect).
   const handleBulkToggleAutoClear = () => {
     setPiUnits((prev) => {
       const allOn = [...selectedUnits].every((id) => prev.find((u) => u.id === id)?.autoClear);
@@ -324,31 +357,28 @@ export default function App() {
     });
   };
 
-  // ===== BULK CLEAR PHOTOS =====
   const handleBulkClearPhotos = async () => {
-    const ips = getSelectedIps();
-    if (ips.length === 0) return;
-    addLog("System", "Clear Photos", `Deleting photos on ${ips.length} Pi(s)…`, "info");
+    const hostnames = getSelectedHostnames();
+    if (hostnames.length === 0) return;
+    addLog("System", "Clear Photos", `Deleting photos on ${hostnames.length} Pi(s)…`, "info");
     try {
       const res = await fetch(`${BACKEND_URL}/delete-photos`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pis: ips }),
+        body: JSON.stringify({ pis: hostnames }),
       });
       const data = await res.json();
-      ips.forEach((ip) => {
-        const unit = piUnitsRef.current.find((u) => u.ipAddress === ip);
-        const label = unit?.id ?? ip;
-        const r = data.results?.[ip];
-        if (r?.error) addLog(label, "Clear Photos", extractError(r.error), "error");
-        else addLog(label, "Clear Photos", "Photos cleared successfully", "success");
+      hostnames.forEach((hostname) => {
+        const unit = piUnitsRef.current.find((u) => u.hostname === hostname);
+        const r = data.results?.[hostname];
+        if (r?.error) addLog(unit?.id ?? hostname, "Clear Photos", extractError(r.error), "error");
+        else addLog(unit?.id ?? hostname, "Clear Photos", "Photos cleared successfully", "success");
       });
     } catch (e) {
       addLog("System", "Clear Photos", extractError(e), "error");
     }
   };
 
-  // ===== CLEAR PHOTOS =====
   const handleClearPhotos = async (unitId: string) => {
     const unit = piUnitsRef.current.find((u) => u.id === unitId);
     if (!unit) return;
@@ -357,10 +387,10 @@ export default function App() {
       const res = await fetch(`${BACKEND_URL}/delete-photos`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pis: [unit.ipAddress] }),
+        body: JSON.stringify({ pis: [unit.hostname] }),
       });
       const data = await res.json();
-      const r = data.results?.[unit.ipAddress];
+      const r = data.results?.[unit.hostname];
       if (r?.error) addLog(unitId, "Clear Photos", extractError(r.error), "error");
       else addLog(unitId, "Clear Photos", "Photos cleared successfully", "success");
     } catch (e) {
@@ -368,7 +398,6 @@ export default function App() {
     }
   };
 
-  // ===== TRANSFER MODAL =====
   const openTransferModal = (target: "bulk" | string) => {
     setModalFolder("");
     setTransferModal({ target });
@@ -384,7 +413,7 @@ export default function App() {
       addLog("System", "Globus Transfer", `Pi "${target}" no longer exists`, "error");
       return;
     }
-    const ips = target === "bulk" ? getSelectedIps() : [targetUnit!.ipAddress];
+    const hostnames = target === "bulk" ? getSelectedHostnames() : [targetUnit!.hostname];
     const label = target === "bulk" ? "System" : target;
 
     addLog(label, "Globus Transfer", `Initiating transfer to folder: ${folder}`, "info");
@@ -392,22 +421,20 @@ export default function App() {
       const res = await fetch(`${BACKEND_URL}/globus-transfer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pis: ips, foldername: folder }),
+        body: JSON.stringify({ pis: hostnames, foldername: folder }),
       });
       const data = await res.json();
-      ips.forEach((ip) => {
-        const unit = piUnitsRef.current.find((u) => u.ipAddress === ip);
-        const entryLabel = unit?.id ?? ip;
-        const r = data.results?.[ip];
-        if (r?.error) addLog(entryLabel, "Globus Transfer", extractError(r.error), "error");
-        else addLog(entryLabel, "Globus Transfer", `Transfer queued → ${folder}`, "success");
+      hostnames.forEach((hostname) => {
+        const unit = piUnitsRef.current.find((u) => u.hostname === hostname);
+        const r = data.results?.[hostname];
+        if (r?.error) addLog(unit?.id ?? hostname, "Globus Transfer", extractError(r.error), "error");
+        else addLog(unit?.id ?? hostname, "Globus Transfer", `Transfer queued → ${folder}`, "success");
       });
     } catch (e) {
       addLog(label, "Globus Transfer", extractError(e), "error");
     }
   };
 
-  // ===== SELECTION HANDLERS =====
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
       setSelectedUnits(new Set(piUnits.filter((u) => u.status !== "offline" && u.status !== "connecting").map((u) => u.id)));
@@ -423,33 +450,12 @@ export default function App() {
     setSelectedUnits(newSelected);
   };
 
-  // ===== ADD / REMOVE / RENAME =====
-  const handleAddPi = () => {
-    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
-    if (!ipRegex.test(newIpAddress)) {
-      addLog("System", "Add Pi", "Invalid IP address format", "error");
-      return;
-    }
-    if (piUnits.some((u) => u.ipAddress === newIpAddress)) {
-      addLog("System", "Add Pi", `IP address ${newIpAddress} already exists`, "error");
-      return;
-    }
-    const maxId = piUnits.reduce((max, u) => {
-      const n = parseInt(u.id.split("-")[1]);
-      return n > max ? n : max;
-    }, 0);
-    const newId = `Pi-${String(maxId + 1).padStart(2, "0")}`;
-    setPiUnits([...piUnits, { id: newId, status: "connecting" as PiStatus, lastResponse: "—", lastResponseTime: "—", ipAddress: newIpAddress, autoClear: false }]);
-    addLog(newId, "Add Pi", `Added new Pi unit at ${newIpAddress}`, "success");
-    setNewIpAddress("");
-  };
-
   const handleRemovePi = (unitId: string) => {
     const unit = piUnits.find((u) => u.id === unitId);
     if (!unit) return;
     setPiUnits(piUnits.filter((u) => u.id !== unitId));
     setSelectedUnits((prev) => { const s = new Set(prev); s.delete(unitId); return s; });
-    addLog(unitId, "Remove Pi", `Removed Pi unit ${unitId} (${unit.ipAddress})`, "info");
+    addLog(unitId, "Remove Pi", `Removed ${unitId} (${unit.hostname})`, "info");
   };
 
   const handleRenamePi = (unitId: string, newId: string) => {
@@ -463,23 +469,17 @@ export default function App() {
     addLog(newId, "Rename Pi", `Renamed from ${unitId} to ${newId}`, "success");
   };
 
-  const handleUpdateIp = (unitId: string, newIp: string) => {
-    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
-    if (!ipRegex.test(newIp)) {
-      addLog(unitId, "Update IP", `"${newIp}" is not a valid IP address`, "error");
+  const handleUpdateHostname = (unitId: string, newHostname: string) => {
+    if (piUnits.some((u) => u.hostname === newHostname && u.id !== unitId)) {
+      addLog(unitId, "Update Hostname", `Hostname ${newHostname} already in use`, "error");
       return;
     }
-    if (piUnits.some((u) => u.ipAddress === newIp && u.id !== unitId)) {
-      addLog(unitId, "Update IP", `IP address ${newIp} already in use`, "error");
-      return;
-    }
-    const updatedUnits = piUnits.map((u) => (u.id === unitId ? { ...u, ipAddress: newIp } : u));
+    const updatedUnits = piUnits.map((u) => (u.id === unitId ? { ...u, hostname: newHostname } : u));
     setPiUnits(updatedUnits);
-    addLog(unitId, "Update IP", `Updated IP to ${newIp}`, "success");
-    pollStatuses(true, updatedUnits.map((u) => u.ipAddress));
+    addLog(unitId, "Update Hostname", `Updated hostname to ${newHostname}`, "success");
+    pollStatuses(true, updatedUnits.map((u) => u.hostname));
   };
 
-  // ===== DRAG TO REORDER =====
   const handleDragEnd = () => {
     if (draggedId && dragOverId && draggedId !== dragOverId) {
       setPiUnits((prev) => {
@@ -500,6 +500,9 @@ export default function App() {
   const selectableCount = piUnits.filter((u) => u.status !== "offline" && u.status !== "connecting").length;
   const allSelected = selectedCount === selectableCount && selectableCount > 0;
   const someSelected = selectedCount > 0 && selectedCount < selectableCount;
+
+  // Hostnames already in fleet (for filtering discovery results)
+  const fleetHostnames = new Set(piUnits.map((u) => u.hostname));
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
@@ -527,7 +530,7 @@ export default function App() {
               </span>
             </div>
 
-            {/* ── Bulk Capture Dropdown ── */}
+            {/* Bulk Capture Dropdown */}
             <div className="relative" ref={bulkCaptureRef}>
               <button
                 disabled={selectedCount === 0}
@@ -558,7 +561,7 @@ export default function App() {
               )}
             </div>
 
-            {/* ── Bulk Transfer Dropdown ── */}
+            {/* Bulk Transfer Dropdown */}
             <div className="relative" ref={bulkTransferRef}>
               <button
                 disabled={selectedCount === 0}
@@ -571,7 +574,6 @@ export default function App() {
               </button>
               {bulkTransferOpen && (() => {
                 const selectedIds = [...selectedUnits];
-                // Read from piUnits state (not the ref) so the dropdown re-renders immediately on toggle
                 const activeCount = selectedIds.filter((id) => piUnits.find((u) => u.id === id)?.transfer?.status === "ACTIVE").length;
                 const allAutoClear = selectedIds.length > 0 && selectedIds.every((id) => piUnits.find((u) => u.id === id)?.autoClear);
                 const someAutoClear = selectedIds.some((id) => piUnits.find((u) => u.id === id)?.autoClear);
@@ -587,7 +589,6 @@ export default function App() {
                     <button
                       onClick={() => { if (activeCount === 0) { setBulkTransferOpen(false); handleBulkClearPhotos(); } }}
                       disabled={activeCount > 0}
-                      title={activeCount > 0 ? `${activeCount} Pi(s) are uploading` : undefined}
                       className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-amber-600 hover:bg-amber-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                     >
                       <Eraser className="h-3.5 w-3.5 flex-shrink-0" />
@@ -627,52 +628,155 @@ export default function App() {
 
       {/* Main Content */}
       <main className="container mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-          {piUnits.map((unit) => (
-            <PiUnitCard
-              key={unit.id}
-              unit={unit}
-              selected={selectedUnits.has(unit.id)}
-              onSelectChange={(selected) => handleSelectUnit(unit.id, selected)}
-              onStartCapture={() => handleUnitAction(unit.id, "Start Capture")}
-              onStopCapture={() => handleUnitAction(unit.id, "Stop Capture")}
-              onGlobusTransfer={() => openTransferModal(unit.id)}
-              onClearPhotos={() => handleClearPhotos(unit.id)}
-              onToggleAutoClear={() => handleToggleAutoClear(unit.id)}
-              onRemove={() => handleRemovePi(unit.id)}
-              onRename={(newId) => handleRenamePi(unit.id, newId)}
-              onUpdateIp={(newIp) => handleUpdateIp(unit.id, newIp)}
-              isDragging={draggedId === unit.id}
-              isDragOver={dragOverId === unit.id && draggedId !== unit.id}
-              onDragStart={() => setDraggedId(unit.id)}
-              onDragOver={() => { if (dragOverId !== unit.id) setDragOverId(unit.id); }}
-              onDragEnd={handleDragEnd}
-            />
-          ))}
-        </div>
+        {/* Empty state */}
+        {piUnits.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-24 text-center">
+            <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
+              <Radar className="h-8 w-8 text-gray-400" />
+            </div>
+            <h2 className="text-lg font-semibold text-gray-700 mb-1">No Pis in your fleet</h2>
+            <p className="text-sm text-gray-500 mb-6">Discover Pis on your network or add one manually.</p>
+            <Button onClick={handleDiscover} disabled={isDiscovering}
+              className="bg-red-600 hover:bg-red-700 text-white px-5 py-2 text-sm">
+              <Radar className={`h-4 w-4 mr-2 ${isDiscovering ? "animate-spin" : ""}`} />
+              {isDiscovering ? "Scanning…" : "Discover Pis"}
+            </Button>
+          </div>
+        )}
 
-        {/* Add Pi */}
-        <div className="mt-8 flex flex-wrap items-center gap-3">
-          <input
-            type="text"
-            value={newIpAddress}
-            onChange={(e) => setNewIpAddress(e.target.value)}
-            placeholder="Enter IP address"
-            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-600"
-            onKeyDown={(e) => e.key === "Enter" && handleAddPi()}
-          />
-          <Button variant="outline" size="sm" onClick={handleAddPi}
-            className="border-red-600 text-red-600 hover:bg-red-50 text-sm px-3 py-2">
-            <Plus className="h-4 w-4 mr-1.5" />
-            Add Pi Unit
-          </Button>
-        </div>
+        {piUnits.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+            {piUnits.map((unit) => (
+              <PiUnitCard
+                key={unit.id}
+                unit={unit}
+                selected={selectedUnits.has(unit.id)}
+                onSelectChange={(selected) => handleSelectUnit(unit.id, selected)}
+                onStartCapture={() => handleUnitAction(unit.id, "Start Capture")}
+                onStopCapture={() => handleUnitAction(unit.id, "Stop Capture")}
+                onGlobusTransfer={() => openTransferModal(unit.id)}
+                onClearPhotos={() => handleClearPhotos(unit.id)}
+                onToggleAutoClear={() => handleToggleAutoClear(unit.id)}
+                onRemove={() => handleRemovePi(unit.id)}
+                onRename={(newId) => handleRenamePi(unit.id, newId)}
+                onUpdateHostname={(newHostname) => handleUpdateHostname(unit.id, newHostname)}
+                isDragging={draggedId === unit.id}
+                isDragOver={dragOverId === unit.id && draggedId !== unit.id}
+                onDragStart={() => setDraggedId(unit.id)}
+                onDragOver={() => { if (dragOverId !== unit.id) setDragOverId(unit.id); }}
+                onDragEnd={handleDragEnd}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Discover button (when fleet is non-empty) */}
+        {piUnits.length > 0 && (
+          <div className="mt-8 flex items-center gap-3">
+            <Button
+              onClick={handleDiscover}
+              disabled={isDiscovering}
+              variant="outline"
+              size="sm"
+              className="border-red-600 text-red-600 hover:bg-red-50 text-sm px-3 py-2"
+            >
+              <Radar className={`h-4 w-4 mr-1.5 ${isDiscovering ? "animate-spin" : ""}`} />
+              {isDiscovering ? "Scanning…" : "Discover Pis"}
+            </Button>
+          </div>
+        )}
 
         {/* Log View */}
         <div className="mt-8">
           <LogView logs={logs} onClear={clearLogs} />
         </div>
       </main>
+
+      {/* ── Discovery Modal ── */}
+      {discoveryModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={() => { if (!isDiscovering) setDiscoveryModal(false); }}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 flex flex-col gap-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Discover Pis</h2>
+                <p className="text-sm text-gray-500 mt-0.5">Hawkeye devices found on your network</p>
+              </div>
+              {isDiscovering && (
+                <div className="flex items-center gap-2 text-sm text-red-600">
+                  <Radar className="h-4 w-4 animate-spin" />
+                  <span>Scanning…</span>
+                </div>
+              )}
+            </div>
+
+            {/* Results */}
+            <div className="flex flex-col gap-2 min-h-[80px]">
+              {isDiscovering && discoveredPis.length === 0 && (
+                <div className="flex items-center justify-center py-8 text-gray-400 text-sm">
+                  Scanning network…
+                </div>
+              )}
+              {!isDiscovering && discoveredPis.length === 0 && (
+                <div className="flex flex-col items-center justify-center py-8 text-center">
+                  <p className="text-gray-500 text-sm">No Pis found on the network.</p>
+                  <p className="text-gray-400 text-xs mt-1">Make sure your Pis are powered on and connected.</p>
+                </div>
+              )}
+              {discoveredPis.map((pi) => {
+                const cleanName = pi.hostname.split(".")[0];
+                const hostname = `${cleanName}.local`;
+                const alreadyAdded = fleetHostnames.has(hostname);
+                return (
+                  <div
+                    key={pi.hostname}
+                    className="flex items-center justify-between px-4 py-3 rounded-lg border border-gray-200 bg-gray-50"
+                  >
+                    <div>
+                      <p className="text-sm font-mono font-medium text-gray-900">{hostname}</p>
+                      <p className="text-xs text-gray-400">{pi.ip} · port {pi.port}</p>
+                    </div>
+                    {alreadyAdded ? (
+                      <span className="text-xs text-emerald-600 font-medium px-2 py-1 bg-emerald-50 rounded-full border border-emerald-200">
+                        In fleet
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => handleAddDiscoveredPi(pi)}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-red-600 text-white font-medium hover:bg-red-700 transition-colors"
+                      >
+                        Add
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex justify-between items-center pt-1 border-t border-gray-100">
+              <button
+                onClick={handleDiscover}
+                disabled={isDiscovering}
+                className="text-sm text-red-600 hover:text-red-700 disabled:opacity-40 disabled:cursor-not-allowed font-medium"
+              >
+                {isDiscovering ? "Scanning…" : "Scan again"}
+              </button>
+              <button
+                onClick={() => setDiscoveryModal(false)}
+                className="px-4 py-2 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Globus Transfer Modal ── */}
       {transferModal && (
         <div
@@ -691,7 +795,6 @@ export default function App() {
                   : `Transfer from ${transferModal.target}`}
               </p>
             </div>
-
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium text-gray-700">Destination folder name</label>
               <input
@@ -707,7 +810,6 @@ export default function App() {
                 className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-500 focus:ring-1 focus:ring-red-200"
               />
             </div>
-
             <div className="flex justify-end gap-2 pt-1">
               <button
                 onClick={() => setTransferModal(null)}
